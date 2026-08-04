@@ -1,0 +1,5 @@
+extends:
+  - recommended
+rules:
+  # Dev skeleton uses localhost servers; production servers are added via IaC.
+  no-server-example.com: off

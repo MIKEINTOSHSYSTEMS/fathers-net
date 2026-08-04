@@ -1,4 +1,54 @@
+# =============================================================================
+# FathersNet repository governance (.gitignore)
+# Authority: Repository Governance Resolution (AGD-001) + engineering-standards.md
+# §1 (layout), §16 (secrets) and architecture-baseline.md §16 (FR-170: docs
+# co-located and versioned).
+#
+# Permanent engineering documentation IS VERSIONED and MUST remain trackable:
+#   docs/FathersNet-Complete-SRS.md, implementation-plan/ (incl. architecture
+#   baseline, engineering standards, contract, decision log, status), README.md,
+#   LICENSE. Nothing below may match these paths.
+# =============================================================================
 
+# --- Working artifacts (never tracked) ---------------------------------------
 Z/
-docs/
-implementation-plan/
+docs/tasks/
+docs/sessions/
+
+# --- Turbo repo cache (never commit) -----------------------------------------
+.turbo/
+
+# --- Dependencies --------------------------------------------------------------
+node_modules/
+
+# --- Build output ---------------------------------------------------------------
+dist/
+build/
+coverage/
+coverage-report/
+*.tsbuildinfo
+junit.xml
+
+# --- Runtime / temp -------------------------------------------------------------
+.cache/
+.tmp/
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# --- Environment files — secrets never committed (NFR-022, FR-170) ------------
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
+# --- Local TLS certs (self-signed dev only, infra/docker/certs) --------------
+infra/docker/certs/
+
+# --- OS / editor ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

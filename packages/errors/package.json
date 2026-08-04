@@ -1,0 +1,21 @@
+{
+  "name": "@fathersnet/errors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FathersNet error envelope and error types (engineering-standards.md §5)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\" --config ../../.eslintrc.cjs --no-eslintrc --parser @typescript-eslint/parser"
+  }
+}

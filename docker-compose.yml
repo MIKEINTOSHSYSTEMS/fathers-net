@@ -1,0 +1,137 @@
+# =============================================================================
+# FathersNet local development stack — Milestone 1 foundation.
+# Reference: implementation-plan/12 §2.5 (pinned images). Docker Compose v2.
+#
+# Run:  docker compose up -d infra        (dependencies only)
+#       docker compose up -d --build      (full stack incl. gateway + nginx)
+#       ./scripts/dev.sh                  (deps + turbo dev watch mode)
+#
+# Secrets are read from .env (gitignored); copy .env.example first.
+# n8n is DEVELOPMENT-ONLY and must not be deployed (12 §2.5 / §4.1).
+# =============================================================================
+name: fathersnet
+
+x-common: &common
+  networks:
+    - fathersnet
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *common
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fathersnet
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-local-dev-only}
+      POSTGRES_DB: fathersnet
+    ports:
+      - '5432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fathersnet -d fathersnet']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    <<: *common
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    <<: *common
+    # Pinned to v1.9.7 — the `v1.9` float tag does not exist on Docker Hub.
+    image: qdrant/qdrant:v1.9.7
+    ports:
+      - '6333:6333'
+      - '6334:6334'
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "exec 3<>/dev/tcp/127.0.0.1/6333" || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    <<: *common
+    image: n8nio/n8n:8.66.0
+    profiles: ['dev']
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_USER_MANAGEMENT_DISABLED: 'false'
+      GENERIC_TIMEZONE: Africa/Addis_Ababa
+    ports:
+      - '5678:5678'
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  gateway:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      ENV: ${ENV:-dev}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FN_PORT: '3000'
+      FN_HOST: 0.0.0.0
+      FN_SERVICE_NAME: gateway
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3000/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  nginx:
+    <<: *common
+    image: nginx:1.27-alpine
+    ports:
+      - '8080:80'
+      - '8443:443'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/docker/certs:/etc/nginx/certs:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  redis_data:
+  qdrant_data:
+  n8n_data:
+
+networks:
+  fathersnet:
+    driver: bridge

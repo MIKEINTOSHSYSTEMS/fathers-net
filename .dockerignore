@@ -1,0 +1,14 @@
+# Keep the Docker build context small and free of secrets (NFR-022).
+**/node_modules
+**/dist
+**/coverage
+.git
+docs
+implementation-plan
+Z
+.env
+.env.*
+*.log
+infra/docker/certs
+.github
+.devcontainer

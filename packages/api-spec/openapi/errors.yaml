@@ -1,0 +1,105 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Common Components
+  version: 0.1.0
+  description: Shared schema components referenced by all service contracts (AR-003).
+
+components:
+  schemas:
+    ErrorField:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          description: Machine-readable field/parameter name.
+        reason:
+          type: string
+          description: Human-readable validation reason.
+      additionalProperties: false
+
+    ErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable error code (engineering-standards.md §5).
+            message:
+              type: string
+              description: Human-readable summary. Sanitized for 5xx (never leaks internals).
+            request_id:
+              type: string
+              description: Echo of the X-Request-Id header for trace correlation.
+            errors:
+              type: array
+              description: Present only for validation failures.
+              items:
+                $ref: '#/components/schemas/ErrorField'
+          additionalProperties: false
+      additionalProperties: false
+
+    HealthPayload:
+      type: object
+      required:
+        - status
+        - service
+        - env
+        - version
+        - uptime
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: ok when the service can serve traffic, degraded otherwise.
+        service:
+          type: string
+          description: Service name (FN_SERVICE_NAME).
+        env:
+          type: string
+          enum: [dev, staging, prod]
+        version:
+          type: string
+          description: Release version reported by the service.
+        uptime:
+          type: number
+          format: float
+          description: Process uptime in seconds.
+
+    ReadinessPayload:
+      type: object
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyCheck'
+
+    DependencyCheck:
+      type: object
+      required:
+        - name
+        - status
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [up, down]
+        latency_ms:
+          type: number
+          format: float

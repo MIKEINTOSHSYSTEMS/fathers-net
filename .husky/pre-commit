@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Pre-commit hook (engineering-standards.md §5): runs lint + prettier on staged
+# files via lint-staged. Managed by husky.
+npm run precommit

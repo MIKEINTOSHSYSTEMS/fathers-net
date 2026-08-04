@@ -1,0 +1,73 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Gateway API
+  version: 0.1.0
+  description: >-
+    Public entry point for the FathersNet (Ayay) platform. Milestone 1 exposes
+    operational health endpoints only; business routes land in later milestones
+    and are added here first (AR-003 — contract as source of truth).
+  contact:
+    name: FathersNet Engineering
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:3000
+    description: Local development gateway (nginx terminates TLS in deployment).
+
+# Public operational endpoints are unauthenticated by default. Business routes
+# will declare `security` explicitly per operation when they land.
+security: []
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: >-
+        Returns quickly whenever the process is alive. Does not consult
+        dependencies (SRS §17.5 / infra convention).
+      tags: [operational]
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/HealthPayload'
+        '4XX':
+          description: Malformed request or rate limited (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: >-
+        Reports whether the service is ready to serve traffic. Runs registered
+        dependency probes; in Milestone 1 the registry is empty so readiness is
+        reported as ready unless the process itself is failing.
+      tags: [operational]
+      responses:
+        '200':
+          description: Service is ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ReadinessPayload'
+        '4XX':
+          description: Malformed request or rate limited (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Service is not ready (a required dependency is down).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+components: {}

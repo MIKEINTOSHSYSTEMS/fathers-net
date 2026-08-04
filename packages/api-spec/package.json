@@ -1,0 +1,16 @@
+{
+  "name": "@fathersnet/api-spec",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenAPI contracts — single source of truth for the API surface (AR-003)",
+  "license": "MIT",
+  "files": [
+    "openapi"
+  ],
+  "scripts": {
+    "build": "redocly bundle openapi/gateway.yaml --output dist/openapi/gateway.yaml",
+    "contract:lint": "redocly lint openapi/gateway.yaml --config ../../redocly.yaml",
+    "lint": "redocly lint openapi/gateway.yaml --config ../../redocly.yaml",
+    "sast": "redocly lint openapi/gateway.yaml --config ../../redocly.yaml"
+  }
+}

@@ -1,0 +1,15 @@
+# Generated artifacts
+node_modules/
+dist/
+coverage/
+package-lock.json
+
+# Frozen governance documentation (never auto-formatted; AGD-001)
+# Tracked in git but authored as-is — formatting must not modify frozen docs.
+implementation-plan/
+docs/FathersNet-Complete-SRS.md
+
+# Local scratch and env (never formatted)
+Z/
+.env
+infra/docker/certs/

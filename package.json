@@ -1,0 +1,62 @@
+{
+  "name": "fathers-net",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FathersNet (Ayay) — digital fatherhood and family-health platform (monorepo)",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*",
+    "ai-services/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev --parallel",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "sast": "turbo run sast",
+    "contract:lint": "turbo run contract:lint",
+    "secret:scan": "node scripts/secret-scan.mjs",
+    "prepare": "husky",
+    "precommit": "lint-staged"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,cjs,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,jsonc,yml,yaml,md}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20 <23",
+    "npm": ">=10"
+  },
+  "packageManager": "npm@10.8.2",
+  "devDependencies": {
+    "@redocly/cli": "2.44.1",
+    "@types/jest": "30.0.0",
+    "@types/node": "20.19.43",
+    "@typescript-eslint/eslint-plugin": "8.66.0",
+    "@typescript-eslint/parser": "8.66.0",
+    "eslint": "8.57.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-security": "4.0.1",
+    "husky": "9.1.7",
+    "jest": "30.4.2",
+    "lint-staged": "16.4.0",
+    "prettier": "3.9.6",
+    "ts-jest": "29.4.12",
+    "tsx": "4.23.5",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3"
+  }
+}
