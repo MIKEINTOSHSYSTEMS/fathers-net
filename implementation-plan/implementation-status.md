@@ -15,7 +15,8 @@
 | Planning phase | **Complete** | All 23 plan documents authored (see §2); readiness score in `version.md` |
 | Plan documents authored | 23/23 | `00`–`23` + `version.md` present in `implementation-plan/` |
 | SRS baseline | **Approved for Development Baseline** (FN-SRS-001 v2.0) | Frozen for Phase 0 (WP-001) |
-| Gate G1 | **Not Started** | Requires Phase 0 (WP-001…WP-007) + Phase 1 (WP-008…WP-014) evidence |
+| Gate G1 | **Accepted/Granted** | Accepted 2026-08-05 — M1 foundation evidence reviewed and accepted (see §3, §9) |
+| Phase 2 authorization | **Conditional Foundation Authorization** | Granted 2026-08-05 — preparation activities only (STRIDE, DPIA, migration baseline, secrets foundation, IaC prep, develop workflow, env readiness). Business deliverables (WP-015…WP-024) remain blocked (see §9) |
 | Gate G2 | **Not Started** | Requires Phase 3 (WP-025…WP-032) evidence |
 | Gate G3 | **Not Started** | Requires Phase 9–10 evidence (WP-095…WP-120) |
 | Decisions M-01…M-07 | **Open** (7/7) | Phase 0 gate items; `decision-log.md` §1 |
@@ -61,7 +62,7 @@
 
 | Gate | Definition (`14` §1) | State | Open Items | Evidence Due |
 | --- | --- | --- | --- | --- |
-| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Not Started** | 15 items (`21` §3) | WP-001…WP-014 |
+| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Accepted/Granted** | 15 items (`21` §3) — acceptance record 2026-08-05; Phase 2 foundation-only conditional authorization 2026-08-05 | WP-001…WP-014 |
 | **G2** Core Platform & Security | End of Phase 3 | **Not Started** | 13 items (`21` §4) | WP-025…WP-032 + Phase 2 |
 | **G3** Release & Pilot Launch | Phase 10 go/no-go | **Not Started** | 17 items (`21` §5) | WP-095…WP-120 |
 
@@ -72,8 +73,8 @@
 | Milestone | Checkpoint (`14` §15) | State | Gate |
 | --- | --- | --- | --- |
 | M0 | Phase 0 baseline & decisions approved | **Not Started** | G1 package |
-| M1 | Phase 1 foundation live | **Committed + pushed** `b616224` + `95e4665` + `26acb6e` (2026-08-05 gate passed; foundation `b616224`, doc sync `95e4665`, CI dependency remediation `26acb6e`; GitHub Actions quality job green — run 30963968046; awaiting final human sign-off + Phase 2 authorization) | Gate 1 |
-| M2 | Phase 2 backend core functional | **Not Started** | Internal |
+| M1 | Phase 1 foundation live | **Accepted/Granted** — Gate G1 accepted 2026-08-05. Committed + pushed `b616224` + `95e4665` + `26acb6e` + `9e4c454` (foundation `b616224`, doc sync `95e4665`, CI dependency remediation `26acb6e`, CI evidence doc sync `9e4c454`); GitHub Actions quality job green (runs 30963968046/30964438595); branch protection active (ruleset 20422621: PR + 1 approval + Quality CI + linear history). Phase 2 / Milestone 2 NOT authorized | Gate 1 |
+| M2 | Phase 2 backend core functional | **Not Started** — conditional foundation authorization 2026-08-05 (preparation only: STRIDE, DPIA, migration baseline, secrets, IaC prep, develop workflow, env readiness); WP-015…WP-024 business deliverables remain blocked | Internal |
 | M3 | Phase 3 security complete | **Not Started** | Gate 2 |
 | M4 | Phase 5 channels integrated | **Not Started** | Internal |
 | M5 | Phase 7 app + admin feature complete | **Not Started** | Internal |
@@ -139,10 +140,10 @@ Full register: `16-risk-management-plan.md` §3.
 | --- | --- | --- | --- | --- |
 | WP-008 | Monorepo scaffold | IV | M1 verification gate 2026-08-05: npm workspaces + turbo, TS strict, ESLint/Prettier/editorconfig, husky pre-commit, co-located docs tracked (AGD-001). Remaining: branch protection + PR workflow active (Step 1 completion, G1). | Engineering |
 | WP-009 | CI/CD skeleton | IV | M1 verification gate 2026-08-05: `.github/workflows/ci-cd.yml` (quality → staging [develop] → prod [main] approval gate); YAML validated. Deploy steps are placeholders awaiting M-01 + IaC. | DevOps |
-| WP-010 | IaC dev/staging/prod | S | Requires M-01 + WP-006 (Step 7; not in M1 scope). | DevOps |
+| WP-010 | IaC dev/staging/prod | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + WP-006 (Step 7). | DevOps |
 | WP-011 | Local dev environment (compose) | IV | M1 verification gate 2026-08-05: compose stack (postgres/redis/qdrant/gateway/nginx) all healthy; /healthz + /readyz 200 direct (3000) and via nginx 8080/8443; `docker compose config --quiet` valid. | DevOps |
-| WP-012 | Secret manager wired | S | Requires M-01 + Step 12; local secret-scan + pre-commit scanning in place (not in M1 scope). | DevOps + Security |
-| WP-013 | Migration 001 baseline | S | Requires Step 9; not in M1 scope. | DB Engineer |
+| WP-012 | Secret manager wired | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + Step 12; local secret-scan + pre-commit scanning in place. | DevOps + Security |
+| WP-013 | Migration 001 baseline | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires Step 9. | DB Engineer |
 | WP-014 | Observability + DR skeleton | S | Requires Step 11; not in M1 scope. | DevOps |
 
 ### Phase 2 — Backend Core
@@ -316,10 +317,13 @@ Full register: `16-risk-management-plan.md` §3.
 | 2026-08-05 | Milestone 1 Remediation | Verification findings closed: Fastify FSTDEP023 fixed; devcontainer Docker feature pinned; CI actions SHA-pinned. Evidence below |
 | 2026-08-05 | Milestone 1 Commit + Doc Sync | M1 committed locally as `b616224` (`chore(repo): Milestone 1 repository foundation`, 103 files); this tracker updated to reflect committed state. **Awaiting remote push authorization and final human sign-off.** |
 | 2026-08-05 | Milestone 1 CI Remediation | Post-push CI failure (Typecheck TS7006) resolved: `26acb6e` declares missing workspace dependency edges (test-utils → logger; gateway → test-utils dev). Clean `npm ci` validation green; GitHub Actions run 30963968046 quality job passed (13/13 steps incl. typecheck). Evidence below |
+| 2026-08-05 | Milestone 1 CI Evidence Doc Sync | `9e4c454` docs(status): record Milestone 1 CI remediation evidence (run 30963968046, 13/13; run 30964438595 on `9e4c454` Quality success). |
+| 2026-08-05 | **Gate G1 Human Acceptance** | **Gate G1 ACCEPTED** by human decision. Evidence reviewed and accepted: repository foundation, workspace config, shared package foundation, gateway skeleton, health endpoints, Docker foundation, CI foundation, documentation baseline, CI dependency remediation, GitHub Actions Quality passing, documentation synchronized, main branch governance configured. Ruleset `20422621` verified (PR required, 1 approval, stale-dismissal on, Quality status check required, force-push/deletion blocked, no bypass, admins enforced, conversation resolution on, linear history). **Phase 2 / Milestone 2 remains NOT AUTHORIZED.** |
+| 2026-08-05 | **Phase 2 Conditional Foundation Authorization** | Human granted **CONDITIONAL FOUNDATION AUTHORIZATION ONLY** for Phase 2 — preparation activities allowed: STRIDE review completion, DPIA completion, migration baseline preparation (WP-013), secret management foundation (WP-012), IaC preparation (WP-010), develop branch workflow setup, environment readiness activities. **NOT AUTHORIZED / blocked:** business functionality, user/profile services, pregnancy engine, consent service implementation, content service, reminder engine, journal service, business APIs, mobile app, admin dashboard, production deployment. WP-015…WP-024 business deliverables remain blocked pending M-01…M-07 closure / further authorization. WP-010/WP-012/WP-013 → In Progress (preparation). |
 
 ### Milestone 1 Verification Evidence (2026-08-05 gate)
 
-Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28.5.2, PowerShell 7). **Commit:** `b616224` `chore(repo): Milestone 1 repository foundation` — committed + pushed; GitHub Actions quality job green (run 30963968046); awaiting final human sign-off.
+Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28.5.2, PowerShell 7). **Commit:** `b616224` `chore(repo): Milestone 1 repository foundation` — committed + pushed; GitHub Actions quality job green (run 30963968046); **Gate G1 ACCEPTED by human 2026-08-05** (Phase 2 not authorized).
 
 - **Tooling:** npm workspaces + turbo 2.10.8; TS strict (8/8 typecheck); ESLint 8.57.1 + prettier 3.9.6 format:check green; jest 30.4.2 coverage green (gateway 88.09% lines, all 8 tasks pass); husky pre-commit active.
 - **Build/CI:** `npm run build` 6/6; `npm run audit` 0 vulns (prod deps); `npm run sast` 6/6; `npm run contract:lint` valid (Redocly); `npm run secret:scan` clean; CI workflow YAML valid (quality/staging/production jobs).
@@ -339,8 +343,8 @@ Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28
 - **Fix (`26acb6e` `fix(workspace): declare missing @fathersnet dependency edges`):** added `@fathersnet/logger: "*"` to `packages/test-utils/package.json` (`dependencies`) and `@fathersnet/test-utils: "*"` to `services/gateway/package.json` (`devDependencies`); `package-lock.json` updated (2 dependency edges only, 7+/1−). No source, CI, or architecture changes.
 - **Clean CI reproduction validation:** removed all `dist/`/`coverage`/`.turbo` → `npm ci` → `turbo run typecheck --force` **9/9** (previously failed in this exact state); `npm run build` 6/6; `npm run lint` clean; `npm run format:check` clean; `npm run test:coverage` **9/9** (gateway 88.09% lines; config 93.65%, errors 75.51%, logger 82.75%, test-utils 87.09% — QR-002 global ≥70%); `npm run audit` 0 vulns; `npm run sast` clean; `npm run secret:scan` clean.
 - **CI verification (GitHub Actions):** run **`30963968046`** on `26acb6e` — **Quality job passed, 13/13 steps** (Lint, Format check, **Typecheck**, Tests with coverage, Build, SAST, API contract lint, Dependency audit, Secret scan). `Deploy to production (main)` parked at the manual-approval gate (deploy steps are placeholders — not approved); `Deploy to staging (develop)` skipped (no `develop` branch).
-- **Gate G1 evidence status:** engineering/tooling evidence package complete; remaining conditions — branch protection (repo admin) and final human acceptance/sign-off before Phase 2 authorization.
+- **Gate G1 evidence status:** engineering/tooling evidence package complete; **Gate G1 ACCEPTED 2026-08-05** — branch protection active (ruleset `20422621`: PR required, `required_approving_review_count: 1`, `dismiss_stale_reviews_on_push: true`, `required_review_thread_resolution: true`, required status check `Quality (lint, typecheck, tests, build)`, force-push + deletion blocked, no bypass actors, linear history) and human acceptance recorded. **Phase 2 / Milestone 2 NOT AUTHORIZED until separately approved.**
 
 ---
 
-**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Milestone 1 final sign-off and Gate G1 acceptance package (evidence assembled; CI green), or WP-001 kickoff at Phase 0 start (`17` §12.4).
+**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **Phase 2 CONDITIONAL FOUNDATION AUTHORIZATION granted 2026-08-05** (preparation activities only; WP-015…WP-024 business deliverables remain blocked) — awaiting M-01…M-07 closure and/or full Phase 2 authorization, or WP-001 kickoff at Phase 0 start (`17` §12.4).
