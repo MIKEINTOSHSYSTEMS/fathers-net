@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Budget Service Contract
+  version: 0.1.0
+  description: >-
+    Skeleton for the budget/allocation service contract (AR-003). Planned
+    resources (implementation-plan/06 Phase B): allocation planning, budget
+    tracking. Contracts are defined here BEFORE implementation; paths land with
+    the corresponding work package.
+  contact:
+    name: FathersNet Engineering
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development gateway (nginx terminates TLS in deployment).
+
+security:
+  - bearerAuth: []
+
+paths: {}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: './common.yaml#/components/securitySchemes/bearerAuth'

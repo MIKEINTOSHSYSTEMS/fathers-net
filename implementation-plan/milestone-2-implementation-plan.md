@@ -1,8 +1,8 @@
-# Milestone 2 Implementation Plan — DRAFT FOR REVIEW
+# Milestone 2 Implementation Plan — APPROVED
 
-**Document:** Working draft (not part of the numbered `00`–`23` plan set; versioned via PR `docs/milestone-2-planning-review`).
+**Document:** Milestone 2 execution plan (not part of the numbered `00`–`23` plan set; versioned via PR `docs/milestone-2-planning-review`).
 **Date:** 2026-08-05
-**Status:** **DRAFT — pending Project Owner review/approval. No implementation begins from this document.**
+**Status:** **APPROVED 2026-08-05 by Project Owner** — Milestone 2 (Phase 2 backend core) sanctioned for execution. Implementation proceeds one work package at a time through the governed PR path (§9) per AGD-002.
 **Prepared by:** Implementation agent, per governed Phase 2 process (planning/verification only).
 **Controlling references:** `17-final-execution-roadmap.md` §3 (Phase 2, WP-015…WP-024) and §5 (M2); `14-development-phase-roadmap.md` §5 (Phase 2); `06-backend-development-plan.md` (backend build sequence); `05-database-implementation-plan.md` §4 (migration order); `18-implementation-verification-plan.md` §2.1 (evidence: Produced → Passed → Signed); `21-quality-gate-checklist.md` §4 (G2).
 
@@ -25,14 +25,14 @@ This document is the **execution plan for Milestone 2 (Phase 2 — Backend Core)
 | Item | State |
 | --- | --- |
 | Gate G1 | **Accepted/Granted** 2026-08-05 (ruleset `20422621`, Quality CI green) |
-| Phase 2 authorization | **FULL AUTHORIZATION GRANTED** 2026-08-05 (Project Owner) for WP-015…WP-024 with approved work packages; **implementation not started** |
+| Phase 2 authorization | **FULL AUTHORIZATION GRANTED** 2026-08-05 (Project Owner) for WP-015…WP-024 with approved work packages; **WP-015 in progress**, WP-016…WP-024 not started |
 | Migration 001 | **AUTHORIZED for future Milestone 2 implementation only** (Project Owner) — no schema exists yet |
 | M-01 (cloud provider) | **Approved/Closed** — GCP, cloud-agnostic |
 | M-02…M-07 | **Open** — Phase 2 relevance handled by draft decision **M-08** (`decision-log.md` §1.2, pending Project Owner signature); see §10 items 1–2 |
 | G1-05 STRIDE / G1-06 DPIA | **Approved by Project Owner** (draft evidence preserved) |
-| `develop` branch | **Does not exist** — must be created + pushed per governance before Phase 2 deploys (§9) |
+| `develop` branch | **Created + pushed 2026-08-05** from `main` (`7cb9a06`) per §9 — closes the unmet `repository-bootstrap-order.md` completion criterion |
 
-**Boundary rule:** this plan authorizes **planning only**. Execution starts only after the Project Owner approves this plan (§11), and every step lands through the governed PR path (§9).
+**Boundary rule:** execution lands through the governed PR path (§9). WP-015…WP-024 proceed one work package at a time; each WP ends with an implementation report and waits for a separate authorization before the next begins.
 
 ---
 
@@ -229,7 +229,7 @@ Existing packages reused: `config`, `errors`, `logger`, `test-utils`, `db`, `api
 
 ## 9. Branch / PR / Deploy Strategy
 
-1. **Create + push `develop`** branch from `main`. This is not a new workflow chosen by this plan — it is an **existing governance requirement**: SRS §16.2 + `04` §20 (staging on `develop`), `12` §5.2 + `architecture-baseline.md` (feature → `develop` → `main`, NFR-039 branch/PR workflow), and `repository-bootstrap-order.md` line 25 whose completion criterion ("`main` + `develop` exist, `main` protected, no code yet") was **not met** — creating `develop` closes that bootstrap gap. Required: 1 approving review (separate account; PR author cannot self-approve), Quality CI green, linear history — ruleset `20422621` applies. `develop` should also receive branch protection per `12` §5.4.
+1. **Create + push `develop`** branch from `main`. This is not a new workflow chosen by this plan — it is an **existing governance requirement**: SRS §16.2 + `04` §20 (staging on `develop`), `12` §5.2 + `architecture-baseline.md` (feature → `develop` → `main`, NFR-039 branch/PR workflow), and `repository-bootstrap-order.md` line 25 whose completion criterion ("`main` + `develop` exist, `main` protected, no code yet") was **not met** — creating `develop` closes that bootstrap gap. **DONE 2026-08-05** (from `main` `7cb9a06`). Required: Quality CI green, linear history — ruleset `20422621` applies. `develop` should also receive branch protection per `12` §5.4. **Merge policy:** AGD-002 (solo-maintainer) permits `MIKEINTOSHSYSTEMS` to merge own PRs via the rule-scoped ruleset `20422621` bypass (`bypass_mode: always`) — a documented exception, NOT an independent review; security-sensitive changes (auth/tokens, PII, encryption, AI prompts, dependencies, IaC/CI) require documented Project Owner sign-off + mandatory CI.
 2. **All Phase 2 work lands on `develop`** via small, reviewable PRs (one WP or sub-step each). Never push directly to `main` (ruleset blocks; linear history).
 3. **CI:** existing `Quality` job gates every PR (lint/typecheck/tests+coverage/build/SAST/contract lint/audit/secret scan). `db-baseline` validates migrations on ephemeral postgres.
 4. **Deployment:** `Deploy to staging (develop)` job becomes active once `develop` exists (currently skipped). **No production deployment** — `main` deploy stays parked at the manual-approval gate with placeholder steps.
@@ -244,23 +244,23 @@ Existing packages reused: `config`, `errors`, `logger`, `test-utils`, `db`, `api
 3. **Auth tables not in `05` §4.2.** `otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa` (required by WP-016 per `06` Phase B) are absent from the `05` migration table and the SRS §13.3 catalog. **Handling path:** deferred to DB architect — `05` §4.3 documents both storage options (A. Redis-only per `03`/`11`; B. Redis + Postgres record). If B is chosen, append as migration `018` (avoids renumbering 003–017; note `005` is already `prompts`) and update `05` §4.2 + `06` Phase B. **Requires DB architect sign-off + decision-log entry + Project Owner visibility.**
 4. **Migration numbering conflict between `06` §4 ("Migration `000N`") and `05` §4.2 (001–017).** **RESOLVED in this documentation PR:** `06` §4 now references `05` §4.2 IDs and records the rule that engineering tables beyond the `05` catalog require a `05` §4.2 update + approval; `17` §3 WP-013 reworded to match. No `000N` sequence remains.
 5. **`audit_logs` deferral.** `05` migration 015 creates the immutable audit table (Phase 3, WP-027). Phase 2 ships FR-127 access logging at the app layer. Confirm this deferral is acceptable (no DB-level append-only audit until Phase 3).
-6. **`develop` branch creation** requires a push + PR approval (separate account) — the same self-approval constraint as PR #3. It closes the unmet `repository-bootstrap-order.md` completion criterion; governed by SRS §16.2 / `12` §5.2 (see §9).
+6. **`develop` branch creation.** **RESOLVED 2026-08-05** — `develop` created + pushed from `main` (`7cb9a06`) before WP-015 work (per §9), closing the unmet `repository-bootstrap-order.md` completion criterion. Merge governance per AGD-002 / §9.1.
 7. **Content service clinical review (D-04 / QR-019)** is a program dependency for *publishing*, not for *building* WP-020. Confirm the clinical reviewer engagement is scheduled ahead (R-04 mitigation).
 8. **Engineering tables beyond the `05` §4.2 catalog.** Several `06` phase table lists include additions not in `05` §4.2 or the SRS §13.3 catalog (e.g., `reminder_templates`, `shared_journey_links`, `data_export_jobs`, `deletion_requests`, `cohort_tags`, `whatsapp_templates`, `support_tickets`, `research_export_jobs`). These must be added to `05` §4.2 with schema approval + decision-log entry before their phase lands (note added in `06` §4). Flag for DB architect review alongside item 3.
 
 ---
 
-## 11. Review Gate for This Plan
+## 11. Approval Record
 
-This document is a **draft**. Before any code is written, the Project Owner should:
+This plan was **approved 2026-08-05 by the Project Owner**, together with authorization to begin **WP-015** (API platform foundation) only. The §11 review checklist is closed:
 
-- [ ] Confirm the scope (§1) and boundaries (§2).
-- [ ] Approve or amend the execution sequence (§4) and WP breakdown (§5).
-- [ ] Resolve open items (§10) — at minimum items 1 (M-08 signature), 3 (auth-storage), and 6 (develop) before Steps 1/4.
-- [ ] Record the plan approval and the M-08 decision in `decision-log.md` and `implementation-status.md` §9 update log.
+- [x] Scope (§1) and boundaries (§2) confirmed.
+- [x] Execution sequence (§4) and WP breakdown (§5) approved.
+- [x] Open items (§10) disposition: item 4 resolved in the planning review PR (R1–R8); item 6 resolved 2026-08-05 (`develop` created + pushed). Items 1–3, 5, 7–8 remain open with agreed handling paths (M-08 draft decision pending Project Owner signature; DB architect sign-off for auth storage; audit-log deferral to Phase 3; clinical review scheduling; `05` §4.2 additions) — none block WP-015 (Step 2).
+- [x] Plan approval recorded in `implementation-status.md` §9; AGD-002 cross-references recorded (`decision-log.md` §7, `12` §5.3/§5.6, `architecture-baseline.md` §17, `repository-bootstrap-order.md` Step 1, `21-quality-gate-checklist.md` §3.4/§6).
 
-**Until then: no implementation, no commits, no pushes.**
+Implementation proceeds one work package at a time; each WP ends with an implementation report and waits for separate authorization before the next begins.
 
 ---
 
-**END OF DRAFT — Milestone 2 Implementation Plan.** Next executable step is conditional on this plan's approval: create `develop`, land migration baseline (001–004), then WP-015 → WP-024 per §4, with M2 exit evidence per §8.
+**END OF DOCUMENT — Milestone 2 Implementation Plan (APPROVED).** Execution in progress: `develop` created; **WP-015 (API platform foundation) implemented** — see `implementation-status.md` §9 and the WP-015 implementation report. Remaining execution: migration baseline (001–004, Step 1) and WP-016…WP-024 per §4, with M2 exit evidence per §8.

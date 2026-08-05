@@ -1,0 +1,95 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Common Platform Components
+  version: 0.1.0
+  description: >-
+    Shared platform-level components for all service contracts (AR-003). Covers
+    the API conventions from implementation-plan/06: idempotency (FR-161), rate
+    limiting (FR-169), pagination (06 §3.5) and the bearer pass-through scheme.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development gateway (nginx terminates TLS in deployment).
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Bearer token pass-through (WP-015). The gateway records whether a
+        bearer token was presented (request.identity) but does NOT validate it
+        yet; token validation lands in WP-016. Operations may declare this
+        scheme — enforcement is deferred until WP-016.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Client-generated identifier (8-128 printable ASCII characters) that
+        makes a mutating request idempotent (06 §2.3 / FR-161). The gateway
+        stores the first response and replays it for retries; requests without
+        a key are processed without idempotency guarantees.
+      schema:
+        type: string
+        pattern: '^[\x21-\x7E]{8,128}$'
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number (offset pagination, 06 §3.5).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items per page (06 §3.5).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  headers:
+    RateLimitLimit:
+      description: Maximum requests permitted in the window for this bucket.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Requests remaining in the window for this bucket.
+      schema:
+        type: integer
+    RateLimitReset:
+      description: Unix epoch seconds at which the window resets.
+      schema:
+        type: integer
+    RetryAfter:
+      description: Seconds to wait before retrying (sent with 429 responses).
+      schema:
+        type: integer
+
+  schemas:
+    ListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Items for the current page.
+        page:
+          type: integer
+          description: Current 1-based page number.
+        has_more:
+          type: boolean
+          description: True when more pages follow the current one.
+      additionalProperties: false

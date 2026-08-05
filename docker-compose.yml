@@ -90,6 +90,14 @@ services:
       FN_PORT: '3000'
       FN_HOST: 0.0.0.0
       FN_SERVICE_NAME: gateway
+      FN_CORS_ORIGINS: ${FN_CORS_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      FN_REDIS_URL: redis://redis:6379
+      FN_STORE_DRIVER: redis
+      FN_RATE_LIMIT_DEFAULT: '120'
+      FN_RATE_LIMIT_AI: '30'
+      FN_RATE_LIMIT_ADMIN_EXPORT: '10'
+      FN_RATE_LIMIT_WINDOW_SECONDS: '60'
+      FN_IDEMPOTENCY_TTL_SECONDS: '86400'
     ports:
       - '3000:3000'
     depends_on:

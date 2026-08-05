@@ -1,0 +1,29 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Auth Service Contract
+  version: 0.1.0
+  description: >-
+    Skeleton for the authentication/authorization service contract (AR-003).
+    Planned resources (from implementation-plan/06 Phase B): phone/OTP login
+    (FR-108), session and token issuance, user token revocation. Contracts are
+    defined here BEFORE implementation; paths land with the corresponding work
+    package. Enforcement of the bearerAuth scheme at the gateway is deferred to
+    WP-016.
+  contact:
+    name: FathersNet Engineering
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development gateway (nginx terminates TLS in deployment).
+
+security: []
+
+paths: {}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: './common.yaml#/components/securitySchemes/bearerAuth'

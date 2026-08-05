@@ -3,9 +3,11 @@ info:
   title: FathersNet Gateway API
   version: 0.1.0
   description: >-
-    Public entry point for the FathersNet (Ayay) platform. Milestone 1 exposes
-    operational health endpoints only; business routes land in later milestones
-    and are added here first (AR-003 — contract as source of truth).
+    Public entry point for the FathersNet (Ayay) platform. Exposes operational
+    health endpoints and the platform v1 surface — smoke routes exercising the
+    WP-015 middleware: CORS allow-list, auth pass-through, rate limiting
+    (FR-169) and idempotency (FR-161). Business routes land in later work
+    packages and are added here first (AR-003 — contract as source of truth).
   contact:
     name: FathersNet Engineering
   license:
@@ -15,8 +17,8 @@ servers:
   - url: http://localhost:3000
     description: Local development gateway (nginx terminates TLS in deployment).
 
-# Public operational endpoints are unauthenticated by default. Business routes
-# will declare `security` explicitly per operation when they land.
+# Operational and platform endpoints are unauthenticated at the gateway layer.
+# Tokens pass through for downstream validation (WP-016).
 security: []
 
 paths:
@@ -70,4 +72,135 @@ paths:
               schema:
                 $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
-components: {}
+  /v1/ping:
+    get:
+      operationId: getV1Ping
+      summary: Platform smoke probe
+      description: >-
+        Verifies the WP-015 platform middleware stack is live. Echoes whether a
+        bearer token was presented (pass-through, not validated until WP-016).
+      tags: [platform]
+      responses:
+        '200':
+          description: Platform middleware is operational.
+          headers:
+            X-RateLimit-Limit:
+              $ref: './common.yaml#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: './common.yaml#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: './common.yaml#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingPayload'
+        '429':
+          description: Rate limit exceeded (FR-169).
+          headers:
+            Retry-After:
+              $ref: './common.yaml#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/platform/echo:
+    post:
+      operationId: postPlatformEcho
+      summary: Idempotent echo (platform smoke)
+      description: >-
+        Echoes the request body. Intended to exercise the idempotency store:
+        repeat the same POST with an Idempotency-Key and the first response is
+        replayed (FR-161, 06 §2.3).
+      tags: [platform]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Arbitrary JSON echoed back verbatim.
+      responses:
+        '200':
+          description: Request processed (or replayed from the idempotency store).
+          headers:
+            X-Idempotency-Replayed:
+              description: 'true when the response was replayed from a stored result.'
+              schema:
+                type: string
+                enum: ['true']
+            X-RateLimit-Limit:
+              $ref: './common.yaml#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: './common.yaml#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: './common.yaml#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EchoPayload'
+        '400':
+          description: Malformed Idempotency-Key (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Idempotency key is already being processed.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Rate limit exceeded (FR-169).
+          headers:
+            Retry-After:
+              $ref: './common.yaml#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+components:
+  schemas:
+    PingPayload:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - env
+        - authenticated
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+          description: Service name (FN_SERVICE_NAME).
+        version:
+          type: string
+        env:
+          type: string
+          enum: [dev, staging, prod]
+        authenticated:
+          type: boolean
+          description: >-
+            True when a Bearer token was presented to the gateway. Pass-through
+            only — token validation lands in WP-016.
+        uptime:
+          type: number
+          format: float
+          description: Process uptime in seconds.
+      additionalProperties: false
+
+    EchoPayload:
+      type: object
+      required:
+        - echo
+      properties:
+        echo:
+          description: The request body echoed back verbatim.
+      additionalProperties: false
