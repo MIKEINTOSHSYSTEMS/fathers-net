@@ -41,6 +41,11 @@
     "npm": ">=10"
   },
   "packageManager": "npm@10.8.2",
+  "overrides": {
+    "node-pg-migrate": {
+      "glob": "11.1.0"
+    }
+  },
   "devDependencies": {
     "@redocly/cli": "2.44.1",
     "@types/jest": "30.0.0",
