@@ -389,6 +389,17 @@ Migrations are numbered, atomic (wrapped in a transaction where PostgreSQL allow
 | --- | --- | --- | --- |
 | SRS §13.3 ordering, §16.1 (27-table schema), FR-164 — Engineering recommendation | Medium | Groups co-dependent tables; every migration only references already-created parents; enables incremental rollout and data backfills | Reordering invalidates FK constraints; merging all tables into one migration reduces reviewability and rollback granularity |
 
+### 4.3 Auth-state storage decision (PENDING — DB architect)
+
+The four auth tables proposed by `06-backend-development-plan.md` Phase B (`otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa`) are **not** in the SRS §13.3 table catalog (§13.3.1…§13.3.27) and **not** in the §4.2 migration table above. The approved position in `03-system-architecture-plan.md` (§3.1, D-07) and `11-security-and-privacy-plan.md` (§3.2) is Redis-hosted OTP state and revoked-token checks; `06` Phase B additionally proposes a Postgres record ("OTP store (Redis + Postgres record)"). Storage strategy is an **architecture decision deferred to the DB architect**; both options are documented below without a preference being chosen.
+
+| Option | Tables | Mechanics | Pros | Cons |
+| --- | --- | --- | --- | --- |
+| A. Redis-only | none added | OTP state + revoked-token checks in Redis with TTL; refresh-rotation reuse-detection via a Redis revoked set (`03` §3.1, D-07; `11` §3.2) | Matches the approved `03`/`11` position and the SRS §13.3 catalog; no schema extension; no new migration | OTP/token history not durable beyond Redis TTL; rotation reuse-detection depends on revocation-list retention discipline |
+| B. Redis + Postgres record | `otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa` (`06` Phase B) | Redis for fast checks; Postgres durable record for rotation history/audit | Durable rotation + audit trail; reuse-detection survives Redis flush; staff model (Phase L) needs a persistent table regardless | Extends the schema beyond SRS §13.3 (requires a `decision-log.md` entry + approval); new §4.2 migration (proposed append as `018` to avoid renumbering 003–017) |
+
+**Decision path.** DB architect + Technical Lead choose A or B. If B: add the migration to §4.2 (proposed `018`), update `06` Phase B to reference it, and record in `decision-log.md`. If A: update `06` Phase B to drop the four tables and cite Redis + `audit_logs` (migration 015). `staff_users`/`staff_mfa` (needed by Phase L regardless) may be decided separately from the OTP/refresh-token store. Requires Project Owner visibility because the schema boundary of the authorized Migration 001 baseline is affected. **Status: PENDING — no schema change until this is decided.**
+
 ---
 
 ## 5. Relationships

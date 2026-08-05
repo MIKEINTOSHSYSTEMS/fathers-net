@@ -76,7 +76,7 @@ Legend — owner doc reference: **03** system architecture · **04** technology 
 | WP-010 | IaC for dev/staging/prod (compute, PostgreSQL, Qdrant, Redis, object storage, networking); environment isolation | `12`, `14` | WP-003, WP-006 | AR-036, AR-009, FR-170, NFR-036 |
 | WP-011 | Local dev environment: Docker Compose reference mirroring production topology | `12`, `14` | WP-010 | NFR-036, SRS §16.1 |
 | WP-012 | Secret manager wired into services and CI; no secrets in code/images/config/logs; rotation schedule defined | `12`, `11`, `14` | WP-009, WP-010 | FR-170, NFR-022 |
-| WP-013 | Database migration baseline — migration 001 creating `users`, `profiles`, `pregnancies`, `consents`, `audit_logs`, `conversations`, `messages`; append-only consent/audit semantics | `05`, `14` | WP-010, WP-012 | FR-164, AR-011, AR-012, NFR-023 |
+| WP-013 | Database migration baseline — migrations 001–004 per `05` §4.2 (`extensions-and-schemas`, `users-and-profiles`, `pregnancies-and-babies`, `consents-and-preferences`); append-only consent semantics (AR-012); `audit_logs` (migration 015) deferred to WP-027, `conversations`/`messages` (migration 008) to Phase 4 | `05`, `14` | WP-010, WP-012 | FR-164, AR-011, AR-012, NFR-023 |
 | WP-014 | Observability foundation (central logs, metrics, traces, alert routing, severity/escalation) + backup/DR skeleton per §19 defaults | `12`, `14` | WP-010, WP-012, WP-013 | FR-155, FR-166, FR-165, NFR-037, NFR-010, OR-007, OR-008 |
 
 **Phase 1 exit: Gate G1 accepted** — IaC applies cleanly; CI/CD gates block promotion; migration 001 runs and rolls back; zero secrets in repo/CI; synthetic alert fires (`14` §4).
