@@ -8,6 +8,13 @@ export interface GatewayConfig {
   FN_VERSION: string;
   FN_CORS_ORIGINS: string[];
   LOG_LEVEL: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+  FN_REDIS_URL: string;
+  FN_STORE_DRIVER: 'memory' | 'redis';
+  FN_RATE_LIMIT_DEFAULT: number;
+  FN_RATE_LIMIT_AI: number;
+  FN_RATE_LIMIT_ADMIN_EXPORT: number;
+  FN_RATE_LIMIT_WINDOW_SECONDS: number;
+  FN_IDEMPOTENCY_TTL_SECONDS: number;
 }
 
 const SCHEMA = {
@@ -22,6 +29,13 @@ const SCHEMA = {
     default: 'info',
     enumValues: ['trace', 'debug', 'info', 'warn', 'error', 'fatal'],
   },
+  FN_REDIS_URL: { type: 'string', default: 'redis://127.0.0.1:6379' },
+  FN_STORE_DRIVER: { type: 'enum', default: 'memory', enumValues: ['memory', 'redis'] },
+  FN_RATE_LIMIT_DEFAULT: { type: 'number', default: '120', min: 1, max: 100000 },
+  FN_RATE_LIMIT_AI: { type: 'number', default: '30', min: 1, max: 100000 },
+  FN_RATE_LIMIT_ADMIN_EXPORT: { type: 'number', default: '10', min: 1, max: 100000 },
+  FN_RATE_LIMIT_WINDOW_SECONDS: { type: 'number', default: '60', min: 1, max: 86400 },
+  FN_IDEMPOTENCY_TTL_SECONDS: { type: 'number', default: '86400', min: 1, max: 604800 },
 } as const;
 
 export function loadGatewayConfig(source: NodeJS.ProcessEnv = process.env): GatewayConfig {
@@ -34,6 +48,13 @@ export function loadGatewayConfig(source: NodeJS.ProcessEnv = process.env): Gate
     FN_VERSION: parsed.FN_VERSION as string,
     FN_CORS_ORIGINS: parsed.FN_CORS_ORIGINS as string[],
     LOG_LEVEL: parsed.LOG_LEVEL as GatewayConfig['LOG_LEVEL'],
+    FN_REDIS_URL: parsed.FN_REDIS_URL as string,
+    FN_STORE_DRIVER: parsed.FN_STORE_DRIVER as GatewayConfig['FN_STORE_DRIVER'],
+    FN_RATE_LIMIT_DEFAULT: parsed.FN_RATE_LIMIT_DEFAULT as number,
+    FN_RATE_LIMIT_AI: parsed.FN_RATE_LIMIT_AI as number,
+    FN_RATE_LIMIT_ADMIN_EXPORT: parsed.FN_RATE_LIMIT_ADMIN_EXPORT as number,
+    FN_RATE_LIMIT_WINDOW_SECONDS: parsed.FN_RATE_LIMIT_WINDOW_SECONDS as number,
+    FN_IDEMPOTENCY_TTL_SECONDS: parsed.FN_IDEMPOTENCY_TTL_SECONDS as number,
   };
   return config;
 }

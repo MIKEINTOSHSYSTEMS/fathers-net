@@ -21,10 +21,12 @@
     "sast": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
+    "@fastify/cors": "10.0.0",
     "@fathersnet/config": "*",
     "@fathersnet/errors": "*",
     "@fathersnet/logger": "*",
-    "fastify": "5.11.2"
+    "fastify": "5.11.2",
+    "ioredis": "5.4.1"
   },
   "devDependencies": {
     "@fathersnet/test-utils": "*"
