@@ -15,7 +15,7 @@ All seven below are **Open** at authoring. Closure of all seven is a Phase 0 har
 
 | # | Title | Recommended Default (from `02` §6 / `04`) | Classification | Affected Risks | Approver (to be named) | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| M-01 | Cloud provider selection | GCP or AWS single-cloud with multi-zone readiness (ADR-006); region-locked service selection for data residency (`04` §14) | Configurable | PM-57, PM-30, PM-28, PM-60 | Product/Leadership + DevOps | **Open** |
+| M-01 | Cloud provider selection | GCP or AWS single-cloud with multi-zone readiness (ADR-006); region-locked service selection for data residency (`04` §14) | Configurable | PM-57, PM-30, PM-28, PM-60 | Product/Leadership + DevOps | **Approved/Closed (2026-08-05)** |
 | M-02 | WhatsApp provider | Meta WhatsApp Business Cloud API primary; abstraction supports Twilio/WATI/360Dialog as drop-in alternates (`04` §13, `07` §3) | Configurable | PM-55, PM-12, PM-59, PM-60 | Program + Integration | **Open** |
 | M-03 | LLM/embedding provider contract | Gemini Flash primary; GPT-4o-mini and Claude 3 Haiku fallback tiers (SRS §9.8, `04` §12); embedding provider per `04` §12.2; DPAs required (FR-073) | Configurable | PM-56, PM-24, PM-60 | Program + AI | **Open** |
 | M-04 | Mobile framework | React Native (larger hiring pool) recommended; Flutter considered (`04` §4) | Configurable | PM-45, PM-03 | Product Engineering | **Open** |
@@ -24,6 +24,21 @@ All seven below are **Open** at authoring. Closure of all seven is a Phase 0 har
 | M-07 | Budget cap default | Program-suggested reference amount; scenario ranges in `20` §3–§6 | Configurable | PM-51, PM-30 | Program | **Open** |
 
 > **Source:** `02` §6 (decision items and recommended assumptions); `04` (stack evaluation behind each default); SRS §5.9 (M-05 default 500+). **Confidence:** High that these seven are the Phase 0 decisions (they are the dependency-map blockers in `02` §3/§4); Medium on the specific defaults until procurement. **Reasoning:** Each M-item is a named blocker of a dependent phase; closing them is a hard gate exit (WP-002). **Impact if changed:** Executing a dependent phase before its M-decision closes recreates PM-49 and voids the provider-abstraction guarantees (PM-08/PM-55/PM-56).
+
+### 1.1 M-01 Closure Record (2026-08-05 — Project Owner)
+
+Closure per Section 5 rules (approver, date, decision, ADR reference, affected PM risks, dependent phase). M-02…M-07 remain **Open**.
+
+| M-01 | Cloud provider selection |
+| --- | --- |
+| **Status** | Approved/Closed (2026-08-05) |
+| **Decision** | **Initial production cloud provider: Google Cloud Platform (GCP).** FathersNet remains **cloud-agnostic**: Docker containers, Terraform Infrastructure as Code, PostgreSQL, environment-based configuration, and provider abstractions where practical. Approval of GCP does not prevent future support for AWS, DigitalOcean, Azure, Kubernetes, or other environments. |
+| **Approver** | Project Owner |
+| **Evidence** | ADR-006 (cloud + IaC + containers; single cloud, multi-zone readiness); `04` §14 region-locked service selection for data residency; Full Phase 2 Authorization governance record 2026-08-05 |
+| **Affected risks closed/reduced** | PM-57, PM-30, PM-28, PM-60 (reduced); PM-49 partially reduced (M-02…M-07 still open) |
+| **Dependent phase unlocked** | WP-010 (IaC prep) and WP-012 (secret management) execution on GCP; Phase 2 / Milestone 2 business implementation |
+| **Co-approvers** | Product/Leadership + DevOps (per §1 approver column) |
+| **Notes** | Cloud-agnostic architecture decision is permanent per Section 5 change control; any later provider addition is a new decision-log entry, never a silent edit. |
 
 ---
 
@@ -116,4 +131,4 @@ Closed governance decisions adopted during Phase 1 (Milestone 1) via the **Repos
 
 ---
 
-**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked; assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. Created as WP-002 of `17-final-execution-roadmap.md`.
+**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07: **M-01 Approved/Closed 2026-08-05 (Project Owner — initial production cloud provider GCP, cloud-agnostic architecture)**; M-02…M-07 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked; assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. Created as WP-002 of `17-final-execution-roadmap.md`.

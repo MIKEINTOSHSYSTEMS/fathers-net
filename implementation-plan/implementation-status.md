@@ -16,10 +16,10 @@
 | Plan documents authored | 23/23 | `00`–`23` + `version.md` present in `implementation-plan/` |
 | SRS baseline | **Approved for Development Baseline** (FN-SRS-001 v2.0) | Frozen for Phase 0 (WP-001) |
 | Gate G1 | **Accepted/Granted** | Accepted 2026-08-05 — M1 foundation evidence reviewed and accepted (see §3, §9) |
-| Phase 2 authorization | **Conditional Foundation Authorization** | Granted 2026-08-05 — preparation activities only (STRIDE, DPIA, migration baseline, secrets foundation, IaC prep, develop workflow, env readiness). Business deliverables (WP-015…WP-024) remain blocked (see §9) |
+| Phase 2 authorization | **FULL AUTHORIZATION GRANTED** | Granted 2026-08-05 by **Project Owner** — Milestone 2 business implementation (WP-015…WP-024) authorized to begin with approved work packages. Governance-recorded only in this task; implementation **not started** (see §9) |
 | Gate G2 | **Not Started** | Requires Phase 3 (WP-025…WP-032) evidence |
 | Gate G3 | **Not Started** | Requires Phase 9–10 evidence (WP-095…WP-120) |
-| Decisions M-01…M-07 | **Open** (7/7) | Phase 0 gate items; `decision-log.md` §1 |
+| Decisions M-01…M-07 | **1/7 closed — M-01 Approved/Closed (GCP); M-02…M-07 Open** | M-01 approved 2026-08-05 (Project Owner): initial production cloud provider **Google Cloud Platform (GCP)**, cloud-agnostic architecture; `decision-log.md` §1/§1.1 |
 | Risks open | 64 planned (PM-01…PM-64) | `16` §3; critical rows: PM-21, PM-26 |
 | Work packages | 0/120 closed | Registry in §7 |
 
@@ -62,7 +62,7 @@
 
 | Gate | Definition (`14` §1) | State | Open Items | Evidence Due |
 | --- | --- | --- | --- | --- |
-| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Accepted/Granted** | 15 items (`21` §3) — acceptance record 2026-08-05; Phase 2 foundation-only conditional authorization 2026-08-05 | WP-001…WP-014 |
+| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Accepted/Granted** | 15 items (`21` §3) — acceptance record 2026-08-05; G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner** 2026-08-05; M-01 closed 2026-08-05 (M-02…M-07 open); full Phase 2 authorization granted 2026-08-05 | WP-001…WP-014 |
 | **G2** Core Platform & Security | End of Phase 3 | **Not Started** | 13 items (`21` §4) | WP-025…WP-032 + Phase 2 |
 | **G3** Release & Pilot Launch | Phase 10 go/no-go | **Not Started** | 17 items (`21` §5) | WP-095…WP-120 |
 
@@ -72,9 +72,9 @@
 
 | Milestone | Checkpoint (`14` §15) | State | Gate |
 | --- | --- | --- | --- |
-| M0 | Phase 0 baseline & decisions approved | **Not Started** | G1 package |
+| M0 | Phase 0 baseline & decisions approved | **In Progress** — M-01 closed 2026-08-05 (GCP, Project Owner); M-02…M-07 open | G1 package |
 | M1 | Phase 1 foundation live | **Accepted/Granted** — Gate G1 accepted 2026-08-05. Committed + pushed `b616224` + `95e4665` + `26acb6e` + `9e4c454` (foundation `b616224`, doc sync `95e4665`, CI dependency remediation `26acb6e`, CI evidence doc sync `9e4c454`); GitHub Actions quality job green (runs 30963968046/30964438595); branch protection active (ruleset 20422621: PR + 1 approval + Quality CI + linear history). Phase 2 / Milestone 2 NOT authorized | Gate 1 |
-| M2 | Phase 2 backend core functional | **Not Started** — conditional foundation authorization 2026-08-05 (preparation only: STRIDE, DPIA, migration baseline, secrets, IaC prep, develop workflow, env readiness); WP-015…WP-024 business deliverables remain blocked | Internal |
+| M2 | Phase 2 backend core functional | **Not Started** — full Phase 2 authorization granted 2026-08-05 (Project Owner); WP-015…WP-024 business implementation authorized to begin with approved work packages but **not started** (governance record only) | Internal |
 | M3 | Phase 3 security complete | **Not Started** | Gate 2 |
 | M4 | Phase 5 channels integrated | **Not Started** | Internal |
 | M5 | Phase 7 app + admin feature complete | **Not Started** | Internal |
@@ -89,7 +89,7 @@
 
 | Decision | Recommended Default (`decision-log.md` §1) | Approver | Status |
 | --- | --- | --- | --- |
-| M-01 Cloud provider | GCP or AWS, multi-zone | Program + DevOps | **Open** |
+| M-01 Cloud provider | **Google Cloud Platform (GCP)** initial production provider; cloud-agnostic (Docker, Terraform IaC, PostgreSQL, env-based config, provider abstractions) | Program + DevOps | **Approved/Closed** (2026-08-05, Project Owner) |
 | M-02 WhatsApp provider | Meta Cloud API primary; alternates | Program + Integration | **Open** |
 | M-03 LLM/embedding | Gemini Flash primary; fallbacks | Program + AI | **Open** |
 | M-04 Mobile framework | React Native recommended | Product Engineering | **Open** |
@@ -127,10 +127,10 @@ Full register: `16-risk-management-plan.md` §3.
 | WP | Work Package | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | WP-001 | Freeze SRS + traceability framework | S | | QA Lead |
-| WP-002 | Decision log; close M-01…M-07 | S | | Program |
+| WP-002 | Decision log; close M-01…M-07 | IP | M-01 closed 2026-08-05 (GCP, Project Owner — `decision-log.md` §1.1); M-02…M-07 open. | Program |
 | WP-003 | Architecture review/sign-off | S | | Technical Lead |
 | WP-004 | Tech-stack sign-off | S | | Architect |
-| WP-005 | STRIDE + DPIA + processing register | IP | Draft STRIDE + DPIA produced 2026-08-05 (foundation prep): `verification/audits/threat-model/stride-threat-model-draft.md`, `verification/audits/dpa/dpia-draft.md`. **DRAFT — human sign-off pending (G1-05/G1-06).** | Security |
+| WP-005 | STRIDE + DPIA + processing register | IP | Draft STRIDE + DPIA produced 2026-08-05 (foundation prep): `verification/audits/threat-model/stride-threat-model-draft.md`, `verification/audits/dpa/dpia-draft.md`. **Approved by Project Owner 2026-08-05 (G1-05/G1-06)** — draft evidence preserved; no independent security/privacy reviewer sign-off claimed. | Security |
 | WP-006 | Provider/environment procurement | S | | Program |
 | WP-007 | Research ethics groundwork + team/risk baseline | S | | Research + Program |
 
@@ -140,10 +140,10 @@ Full register: `16-risk-management-plan.md` §3.
 | --- | --- | --- | --- | --- |
 | WP-008 | Monorepo scaffold | IV | M1 verification gate 2026-08-05: npm workspaces + turbo, TS strict, ESLint/Prettier/editorconfig, husky pre-commit, co-located docs tracked (AGD-001). Remaining: branch protection + PR workflow active (Step 1 completion, G1). | Engineering |
 | WP-009 | CI/CD skeleton | IV | M1 verification gate 2026-08-05: `.github/workflows/ci-cd.yml` (quality → staging [develop] → prod [main] approval gate); YAML validated. Deploy steps are placeholders awaiting M-01 + IaC. | DevOps |
-| WP-010 | IaC dev/staging/prod | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + WP-006 (Step 7). | DevOps |
+| WP-010 | IaC dev/staging/prod | IP | M-01 closed 2026-08-05 (GCP, Project Owner). Execution still requires WP-006 procurement (Step 7). | DevOps |
 | WP-011 | Local dev environment (compose) | IV | M1 verification gate 2026-08-05: compose stack (postgres/redis/qdrant/gateway/nginx) all healthy; /healthz + /readyz 200 direct (3000) and via nginx 8080/8443; `docker compose config --quiet` valid. | DevOps |
-| WP-012 | Secret manager wired | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + Step 12; local secret-scan + pre-commit scanning in place. | DevOps + Security |
-| WP-013 | Migration 001 baseline | IP | Tooling foundation 2026-08-05: `packages/db` (node-pg-migrate runner D-08, `migrate:up|down|check`), empty `migrations/` dir, unit tests, CI `db-baseline` job (ephemeral postgres, creates `pgmigrations` tracking table). **No migration 001 / no schema.** Requires Step 9 + authorization for migration 001. | DB Engineer |
+| WP-012 | Secret manager wired | IP | M-01 closed 2026-08-05 (GCP, Project Owner). Requires Step 12; local secret-scan + pre-commit scanning in place. | DevOps + Security |
+| WP-013 | Migration 001 baseline | IP | Tooling foundation 2026-08-05: `packages/db` (node-pg-migrate runner D-08, `migrate:up|down|check`), empty `migrations/` dir, unit tests, CI `db-baseline` job (ephemeral postgres, creates `pgmigrations` tracking table). **Migration 001 AUTHORIZED by Project Owner 2026-08-05 for future Milestone 2 implementation only — not created in this task; no schema.** Requires Step 9. | DB Engineer |
 | WP-014 | Observability + DR skeleton | S | Requires Step 11; not in M1 scope. | DevOps |
 
 ### Phase 2 — Backend Core
@@ -321,6 +321,7 @@ Full register: `16-risk-management-plan.md` §3.
 | 2026-08-05 | **Gate G1 Human Acceptance** | **Gate G1 ACCEPTED** by human decision. Evidence reviewed and accepted: repository foundation, workspace config, shared package foundation, gateway skeleton, health endpoints, Docker foundation, CI foundation, documentation baseline, CI dependency remediation, GitHub Actions Quality passing, documentation synchronized, main branch governance configured. Ruleset `20422621` verified (PR required, 1 approval, stale-dismissal on, Quality status check required, force-push/deletion blocked, no bypass, admins enforced, conversation resolution on, linear history). **Phase 2 / Milestone 2 remains NOT AUTHORIZED.** |
 | 2026-08-05 | **Phase 2 Conditional Foundation Authorization** | Human granted **CONDITIONAL FOUNDATION AUTHORIZATION ONLY** for Phase 2 — preparation activities allowed: STRIDE review completion, DPIA completion, migration baseline preparation (WP-013), secret management foundation (WP-012), IaC preparation (WP-010), develop branch workflow setup, environment readiness activities. **NOT AUTHORIZED / blocked:** business functionality, user/profile services, pregnancy engine, consent service implementation, content service, reminder engine, journal service, business APIs, mobile app, admin dashboard, production deployment. WP-015…WP-024 business deliverables remain blocked pending M-01…M-07 closure / further authorization. WP-010/WP-012/WP-013 → In Progress (preparation). |
 | 2026-08-05 | **Phase 2 Foundation Preparation Executed** | WP-013 tooling foundation + security/privacy drafts completed (human-approved scope). Changes (working tree, **not committed — awaiting separate authorization**): `packages/db` created (node-pg-migrate 7.9.1 runner, pg 8.13.1, migrate up/down/check, empty `migrations/`, jest unit tests); root `package.json` override `node-pg-migrate→glob 11.1.0` (resolves GHSA-5j98-mcp5-4vw2; `npm audit` clean 0 vulns); `.github/workflows/ci-cd.yml` added `db-baseline` job (ephemeral postgres:16-alpine, validates `pgmigrations` tracking table; quality gate/deploy jobs untouched); STRIDE + DPIA drafts at `verification/audits/threat-model/` and `verification/audits/dpa/` (**DRAFT, not signed — G1-05/G1-06 pending**); WP-005/WP-013 rows updated. Validation: `migrate:up`/`migrate:check` green against compose postgres; checks pending: build/typecheck/lint/format/test:coverage/sast/secret:scan. |
+| 2026-08-05 | **Project Owner Full Phase 2 Authorization (governance record)** | Documentation-only; no implementation, no commit, no push. Recorded: **M-01 APPROVED** — initial production cloud provider **Google Cloud Platform (GCP)**; **cloud-agnostic architecture** confirmed (Docker containers, Terraform IaC, PostgreSQL, environment-based configuration, provider abstractions; AWS/DigitalOcean/Azure/Kubernetes remain supported). **G1-05 STRIDE APPROVED by Project Owner** and **G1-06 DPIA APPROVED by Project Owner** (draft evidence preserved at `verification/audits/`; no independent security/privacy reviewer sign-off claimed). **Migration 001 AUTHORIZED for future Milestone 2 implementation only — not created.** **FULL PHASE 2 AUTHORIZATION GRANTED** — WP-015…WP-024 authorized to begin with approved work packages; **not started**. M-02…M-07 remain Open. Updated: `implementation-status.md`, `decision-log.md` (§1 M-01 + §1.1 closure record), `21-quality-gate-checklist.md` (§3.4 governance approvals record). |
 
 ### Milestone 1 Verification Evidence (2026-08-05 gate)
 
@@ -348,4 +349,4 @@ Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28
 
 ---
 
-**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **Phase 2 CONDITIONAL FOUNDATION AUTHORIZATION granted 2026-08-05** (preparation activities only) — WP-013 tooling foundation + STRIDE/DPIA drafts produced (not committed; sign-off G1-05/G1-06 and M-01…M-07 closure pending); WP-015…WP-024 business deliverables remain blocked — awaiting M-01…M-07 closure and/or full Phase 2 authorization, or WP-001 kickoff at Phase 0 start (`17` §12.4).
+**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **FULL PHASE 2 AUTHORIZATION GRANTED 2026-08-05 (Project Owner)** — M-01 approved (initial production cloud provider **GCP**, cloud-agnostic), G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner**, **Migration 001 authorized for future Milestone 2 implementation only**, WP-015…WP-024 business implementation authorized to begin with approved work packages (**not started** — governance record only). M-02…M-07 remain Open; local `main` ref realignment pending (`origin/main` = `b36dd58`).
