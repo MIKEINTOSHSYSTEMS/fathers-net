@@ -251,7 +251,7 @@ Per `12` §5.2 and SRS §16.2:
 - `develop` — integration; deploys to staging; auto-deploy on push when checks pass.
 - `feature/<ticket>-<slug>` — development branches; PR into `develop`.
 - Optional `hotfix/*` for emergency fixes to `main`, merged back to `develop`.
-- Rules: at least one approving review; AI-prompt/security-sensitive changes require a second reviewer; status checks required; never force-push shared branches (NFR-039; `12` §5.3).
+- Rules: at least one approving review; AI-prompt/security-sensitive changes require a second reviewer; status checks required; never force-push shared branches (NFR-039; `12` §5.3). **Solo-maintainer exception (AGD-002, `decision-log.md` §7):** a rule-scoped bypass on ruleset `20422621` lets the sole maintainer merge own PRs — a documented exception, NOT an independent review; contributor rules are unchanged; the bypass is removed when a second account exists.
 
 ---
 
