@@ -163,6 +163,8 @@ Path versioning `/v1/`; `Sunset` / `Deprecation` response headers on deprecated 
 
 All timelines are **Configurable reference estimates** aligned with SRS Appendix D. Each phase is independently releasable, deployable, and gated by the quality checks in §6.
 
+> **Migration numbering (this plan vs `05`).** Database schema detail is owned by `05-database-implementation-plan.md` §4.2, which is authoritative for migration IDs and grouping. The per-phase "Database changes" bullets below reference `05` §4.2 migration IDs; they do **not** define a competing `000N` sequence. Tables listed in a phase that are **not** in the `05` §4.2 catalog (e.g., `reminder_templates`, `shared_journey_links`, `data_export_jobs`, `whatsapp_templates`, `support_tickets`) are engineering additions that must be added to `05` §4.2 (with schema approval + a `decision-log.md` entry) before that phase lands. The auth tables proposed in Phase B are subject to the pending auth-state storage decision (`05` §4.3).
+
 ---
 
 ### Phase A — Project Scaffolding + Infrastructure
@@ -202,7 +204,7 @@ fathers-net/
 
 **APIs implemented.** None beyond platform endpoints — `GET /healthz`, `GET /readyz` (liveness/readiness, NFR-013) on gateway and each skeleton service.
 
-**Database changes.** Migration runner configured (FR-164, `packages/db`); migration `0001` creates: `users` (§13.3.1), `profiles`, `pregnancies`, `consents` (§13.3.4), `audit_logs` (§13.3.24) — the base tables every phase touches; plus schema-version bookkeeping table. Vector store (Qdrant) and object storage buckets provisioned empty.
+**Database changes.** Migration runner configured (FR-164, `packages/db`); base tables land per `05` §4.2: `001` `extensions-and-schemas`, `002` `users-and-profiles` (`users` §13.3.1, `profiles`), `003` `pregnancies-and-babies` (`pregnancies` §13.3.3), `004` `consents-and-preferences` (`consents` §13.3.4); plus schema-version bookkeeping table. Immutable `audit_logs` (§13.3.24) is `05` §4.2 migration 015, deferred to Phase 3 (WP-027); Phase 2 ships app-layer access logging (FR-127). Vector store (Qdrant) and object storage buckets provisioned empty.
 
 **Tests required.** Unit tests for `packages/*` (config validation, error envelope, idempotency store, outbox relay); integration test for gateway → skeleton-service routing, rate limiting, and `/healthz`; contract lint passing; CI pipeline green with coverage gate scaffolded (QR-002 baseline).
 
@@ -244,7 +246,7 @@ services/auth/
 | `/v1/auth/refresh` | POST | Rotate refresh token; issue new access token |
 | `/v1/auth/logout` | POST | Revoke current session/token |
 
-**Database changes.** Migration `0002`: `otp_codes` (id, phone_hash, purpose, code_hash, expires_at, attempts, locked_until), `refresh_tokens` (id, user_id, token_hash, rotated_from, revoked_at, expires_at), `staff_users` + `staff_mfa` (placeholder role model for Phase L). No OTP/token values stored in plaintext.
+**Database changes.** Auth tables `otp_codes` (id, phone_hash, purpose, code_hash, expires_at, attempts, locked_until), `refresh_tokens` (id, user_id, token_hash, rotated_from, revoked_at, expires_at), `staff_users` + `staff_mfa` (placeholder role model for Phase L) — **placement pending** the auth-state storage decision (`05` §4.3): if a Postgres record is chosen they land as a `05` §4.2 migration (proposed append as `018`); if Redis-only they are not created (state in Redis per `03` §3.1 / `11` §3.2). No OTP/token values stored in plaintext.
 
 **Tests required.** Unit: OTP generation/expiry/lockout, constant-time compare, token claims, refresh rotation and reuse-detection (reuse ⇒ revoke family). Integration: full OTP→verify→refresh→logout flow against Postgres; rate-limit lockout at 5/15 min; revocation on logout. Contract: `auth.yaml` schema validation. Security: no PII or OTP in logs (assert in tests); brute-force lockout test (QR-007 prep).
 
@@ -289,7 +291,7 @@ services/users/
 | `/v1/users/me/export` | POST | Request personal data export (rate-limited 10/min) |
 | `/v1/users/me` | DELETE | Request account deletion (confirmation required) |
 
-**Database changes.** Migration `0003`: `profiles` (§13.3.2), `pregnancies` (§13.3.3 — `edd`/`lmp` constraint, week 1–45 check), `consents` (append-only enforcement, `withdrawn_at`), `user_preferences` (§13.3.26), `data_export_jobs`, `deletion_requests`, `cohort_tags`. Consent immutability enforced at DB layer (AR-012).
+**Database changes.** Profiles/pregnancies/consents/user_preferences land in `05` §4.2 migrations 002–004 (`profiles` §13.3.2, `pregnancies` §13.3.3 with `edd`/`lmp` constraint + week 1–45 check, `consents` append-only with `withdrawn_at`, `user_preferences` §13.3.26); consent immutability enforced at DB layer (AR-012). Operational support tables `data_export_jobs`, `deletion_requests`, `cohort_tags` are additions beyond the `05` §4.2 catalog (see §4 numbering note) — added to `05` §4.2 with approval before use.
 
 **Tests required.** Unit: field validation, consent versioning, withdrawal idempotency, preference enum validation. Integration: full consent lifecycle (grant → withdraw → proof), export job produces portable JSON/PDF per FR-057/FR-128 with SLA, deletion workflow with grace period and deletion record, cohort tagging. Privacy tests (QR-009): no over-collection (FR-124), masked phone in any listing. Contract: `users.yaml`.
 
@@ -332,7 +334,7 @@ services/content/
 | `/v1/content/:id/approve` | POST | Approve (medical reviewer; segregation of duties) |
 | `/v1/content/:id/archive` | POST | Archive/expire; remove from retrieval |
 
-**Database changes.** Migration `0004`: `content` (§13.3.16), `content_versions` (§13.3.17), `content_translations`, `content_ratings`, `content_tags`. FTS index for search; status transitions constrained (draft → pending_medical_review → approved → published → archived, AR-015).
+**Database changes.** `content` (§13.3.16) + `content_versions` (§13.3.17) land in `05` §4.2 migration 011 (`content`); `content_translations`, `content_ratings`, `content_tags` are additions beyond the `05` catalog (see §4 numbering note). FTS index for search; status transitions constrained (draft → pending_medical_review → approved → published → archived, AR-015).
 
 **Tests required.** Unit: workflow state transitions, version snapshot, parity check (EN/AM required fields). Integration: author cannot approve (SoD test, FR-106); archived content excluded from search and from retrieval events; publish emits `content.published`. Contract: `content.yaml`. E2E smoke: draft→submit→approve→publish→searchable (QR-004 prep).
 
@@ -370,7 +372,7 @@ services/reminders/
 
 **APIs implemented.** No public endpoints in §12 beyond `/v1/users/me/pregnancy` (implemented in Phase C, powered here). Internal contracts: `GET /internal/pregnancy/:userId` (current week/trimester/EDD/milestones), `GET /internal/reminders/:userId` (scheduled + past with status). Additive public surfaces (Recommended): `/v1/reminders/:id` GET and `PATCH /v1/reminders/:id/acknowledge` for FR-045 acknowledgement; `/v1/admin/reminder-templates` GET/POST/PUT/PATCH (FR-049) delivered through the Admin service in Phase L.
 
-**Database changes.** Migration `0005`: `appointments` (§13.3.15), `notifications` (§13.3.25), `reminder_templates` (localized, versioned, approval state for FR-049), `reminder_events` (delivery/ack/analytics, FR-045/050), `milestones` (per-user computed), `support_actions` (FR-035). Indexes on `appointments.scheduled_at`, `notifications.user_id`.
+**Database changes.** `appointments` (§13.3.15) lands in `05` §4.2 migration 010 (`budget-and-appointments`), `notifications` (§13.3.25) in migration 014. `reminder_templates`, `reminder_events`, `milestones`, `support_actions` are additions beyond the `05` catalog (see §4 numbering note). Indexes on `appointments.scheduled_at`, `notifications.user_id`.
 
 **Tests required.** Unit: week/trimester math across edge dates (LMP vs EDD, leap years, week 40+), milestone derivation, quiet-hour math, lead-time scheduling, dedup across channels (FR-048), critical override (FR-046). Integration: full schedule→dispatch→ack flow against Postgres with a stub channel provider; duplicate-run test proving scheduler idempotency (FR-163/FR-161). Contract: internal contracts + additive endpoints.
 
@@ -411,7 +413,7 @@ Plus `packages/birth-prep-templates/` (hospital-bag defaults per §8.2, Configur
 | `/v1/budget/entries/:id` | DELETE | Delete entry |
 | `/v1/budget/summary` | GET | Total planned/actual/remaining + variance |
 
-**Database changes.** Migration `0006`: `checklists` (§13.3.12), `checklist_items` (§13.3.13), `budget_entries` (§13.3.14), `shared_journey_links` (partner access records for FR-146). Progress column maintained on write (avoid N+1 reads, NFR-007).
+**Database changes.** `checklists` (§13.3.12) + `checklist_items` (§13.3.13) land in `05` §4.2 migration 009, `budget_entries` (§13.3.14) in migration 010. `shared_journey_links` (partner access records for FR-146) is an addition beyond the `05` catalog (see §4 numbering note). Progress column maintained on write (avoid N+1 reads, NFR-007).
 
 **Tests required.** Unit: progress math, budget totals/variance/remaining per §8.3, category enum validation, per-field merge semantics. Integration: checklist → shopping → budget linkage (FR-087), partner sharing scoping (owner vs partner vs stranger, FR-146), offline revision/conflict merge. Contract: `checklists.yaml`, `budget.yaml`. E2E prep: UC-004 journey.
 
@@ -455,7 +457,7 @@ services/journal/
 | `/v1/journal/entries/:id/share` | POST | Share with linked partner (opt-in) |
 | `/v1/journal/media` | POST | Upload voice/photo (signed upload) |
 
-**Database changes.** Migration `0007`: `journal_entries` (§13.3.6, private-by-default constraint), `journal_media` (§13.3.7), `journal_flags` (FR-058 review queue), `transcription_jobs`. Unique constraint preventing duplicate prompt-response entries (FR-161 idempotency on retried responses).
+**Database changes.** `journal_entries` (§13.3.6, private-by-default constraint) + `journal_media` (§13.3.7) land in `05` §4.2 migration 006 (`journal`). `journal_flags` (FR-058 review queue) and `transcription_jobs` are additions beyond the `05` catalog (see §4 numbering note). Unique constraint preventing duplicate prompt-response entries (FR-161 idempotency on retried responses).
 
 **Tests required.** Unit: privacy enforcement (owner/partner/stranger matrix), timeline ordering, entry-type rules. Integration: media signed-URL lifecycle (upload → access → expiry), transcription pipeline happy/failure paths with stub ASR, prompt-response auto-link, export artifact, share revocation. Privacy (QR-009): deletion of entry removes media references per retention. Contract: `journal.yaml`.
 
@@ -500,7 +502,7 @@ services/whatsapp/
 | `/v1/whatsapp/messages` | GET | Query outbound/inbound message log (admin/support, role-filtered) |
 | `/v1/whatsapp/templates` | GET/POST | List/create templates with approval status (content/admin) |
 
-**Database changes.** Migration `0008`: `conversations` (§13.3.10), `messages` (§13.3.11 with unique `provider_message_id` for dedup), `whatsapp_templates` (EN/AM bodies, platform + internal approval state), `whatsapp_media`, `broadcast_exclusions` (FR-017/112 opt-out list). Idempotency: unique `provider_message_id` (§7.4.1).
+**Database changes.** `conversations` (§13.3.10) + `messages` (§13.3.11 with unique `provider_message_id` for dedup) land in `05` §4.2 migration 008 (`conversations-and-messages`). `whatsapp_templates`, `whatsapp_media`, `broadcast_exclusions` (FR-017/112 opt-out list) are additions beyond the `05` catalog (see §4 numbering note). Idempotency: unique `provider_message_id` (§7.4.1).
 
 **Tests required.** Unit: signature verification (valid/invalid/tampered, constant-time), state-machine transition table per §7.2.2, timeout behavior, quick-reply routing, emergency detection priority, window enforcement. Integration: webhook → state transition → message log flow with mocked provider; media pipeline (type/size/scan); dedup on duplicate `provider_message_id` (FR-161); opt-out blocks broadcast (FR-112). Contract + security: `whatsapp.yaml`; signature-mismatch returns `401`; no phone numbers in logs (FR-022). E2E (QR-010): opt-in → profile → weekly prompt → reply → thank-you → emergency path.
 
@@ -534,7 +536,7 @@ services/campaign/
 
 **APIs implemented.** Public surfaces under §12.10 (delivered via Admin service): `GET/POST /v1/admin/campaigns`. Campaign service internal contract: `GET /internal/campaigns/:id/metrics`, `POST /internal/campaigns/:id/ab-variants` (FR-110). Additive (Recommended): `GET /v1/admin/campaigns/:id` (campaign detail + metrics) documented in `campaigns.yaml`.
 
-**Database changes.** Migration `0009`: `campaigns` (§13.3.18), `campaign_messages` (§13.3.19 with status enum), `campaign_metrics`, `campaign_ab_variants`. Indexes per §13.3.19 (`campaign_id, delivery_status`).
+**Database changes.** `campaigns` (§13.3.18) + `campaign_messages` (§13.3.19 with status enum) land in `05` §4.2 migration 012 (`campaigns`). `campaign_metrics` and `campaign_ab_variants` are additions beyond the `05` catalog (see §4 numbering note). Indexes per §13.3.19 (`campaign_id, delivery_status`).
 
 **Tests required.** Unit: segmentation-filter correctness (week/region/language/cohort/consent), approval-gate blocking (FR-108), throttle math (FR-111), opt-out removal (FR-112). Integration: campaign → dispatch → status callback → metrics; opted-out recipient never receives a send; A/B variant allocation; duplicate-dispatch idempotency (FR-161/FR-163). Contract: `campaigns.yaml`.
 
@@ -582,7 +584,7 @@ services/ai/
 | `/v1/ai/conversations` | GET | List AI conversations (ai_admin/support, role-filtered) |
 | `/v1/ai/safety-events` | GET | List safety/emergency events (ai_admin incident queue) |
 
-**Database changes.** Migration `0010`: `ai_conversations` (§13.3.20), `ai_feedback` (§13.3.21), `ai_prompt_versions`, `knowledge_documents` + `knowledge_chunks` (metadata + chunk state), `ai_eval_samples`, `knowledge_gaps` (FR-074). Qdrant collection `fathersnet_knowledge` with document/version payloads (AR-015/AR-016).
+**Database changes.** `ai_conversations` (§13.3.20) + `ai_feedback` (§13.3.21) land in `05` §4.2 migration 013 (`ai-audit`). `ai_prompt_versions`, `knowledge_documents` + `knowledge_chunks` (metadata + chunk state), `ai_eval_samples`, `knowledge_gaps` (FR-074) are additions beyond the `05` catalog (see §4 numbering note). Qdrant collection `fathersnet_knowledge` with document/version payloads (AR-015/AR-016).
 
 **Tests required.** Unit: intent/language classification, emergency detection priority, retrieval threshold/rerank, prompt assembly/citation, safety-rule engine, model router fallback logic. Integration: ingest → approve → retrieve → cite; retired content not retrievable; provider failure triggers fallback (FR-072); pseudonymization verified before provider call (FR-073). Eval (QR-011/QR-014): accuracy ≥90% target on the approved evaluation set (Configurable, NFR-047), safety regression suite, hallucination sampling. Security: prompt-injection regression suite (§14.1.4). Contract: `ai.yaml`.
 
@@ -619,7 +621,7 @@ services/research/
 
 **APIs implemented.** Public surfaces under §12.10 (via Admin service): `POST /v1/admin/research/export`. Internal contract: `GET /internal/research/dashboard?type=themes|sentiment|engagement` (aggregated only, AR-032). Additive (Recommended): `GET /v1/admin/research/requests` and `POST /v1/admin/research/requests/:id/approve` for the governance workflow (FR-122), documented in `research.yaml`.
 
-**Database changes.** Migration `0011`: `research_responses` (§13.3.22), `research_users` (§13.3.23), `research_analytics`, `research_export_jobs`, `research_governance_requests`, `research_linkage_keys` (access-controlled, separate table per §10.1.3). Research tables physically/logically separated; no operational FK into research tables.
+**Database changes.** `research_responses` (§13.3.22) + `research_users` (§13.3.23) land in `05` §4.2 migration 016 (`research-schema`, in `fn_research`). `research_analytics`, `research_export_jobs`, `research_governance_requests`, `research_linkage_keys` (access-controlled, separate table per §10.1.3) are additions beyond the `05` catalog (see §4 numbering note). Research tables physically/logically separated; no operational FK into research tables.
 
 **Tests required.** Unit: anonymization (no direct identifiers), theme/sentiment mapping, KPI formulas, consent-gating of records. Integration: event → anonymized record → rollup → dashboard; export request blocked without approval; approved export contains zero identifiers (assert programmatically, QR-009/FR-116); consent withdrawal stops ingestion and schedules deletion. Contract: `research.yaml`.
 
@@ -670,7 +672,7 @@ services/admin/
 
 Plus review-queue and retention surfaces (Recommended additive, documented in `admin.yaml`): `GET /v1/admin/queues/:type`, `POST /v1/admin/queues/:type/:id/action`, `GET/PUT /v1/admin/retention-policies`.
 
-**Database changes.** Migration `0012`: `roles`/`permissions` (seed per §14.7), `support_tickets`, `ticket_messages`, `retention_policies`, `admin_notifications`, `review_queue_items` (typed queue entries). `audit_logs` (from Phase A) remains the append-only record for all admin actions.
+**Database changes.** Admin tables `roles`/`permissions` (seed per §14.7), `support_tickets`, `ticket_messages`, `retention_policies`, `admin_notifications`, `review_queue_items` (typed queue entries) are additions beyond the `05` §4.2 catalog (see §4 numbering note); `05` migration 017 seeds reference/config data, so `roles`/`permissions` need a `05` §4.2 entry with approval. `audit_logs` (§13.3.24, `05` migration 015) remains the append-only record for all admin actions.
 
 **Tests required.** Unit: RBAC matrix per §14.7 (each role × each endpoint), SoD blocking, MFA challenge flow, session expiry/revocation/concurrent control, retention rule evaluation. Integration: overview KPIs computed from fixtures; user export masks phones and respects role scope; review-queue actions write audit rows; research export requires second approver (FR-106/122). Security: privilege-escalation attempts denied; MFA enforced on every staff endpoint (FR-101). Contract: `admin.yaml`. E2E: admin dashboard journeys (QR-004).
 

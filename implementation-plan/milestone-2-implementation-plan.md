@@ -1,0 +1,266 @@
+# Milestone 2 Implementation Plan — DRAFT FOR REVIEW
+
+**Document:** Working draft (not part of the numbered `00`–`23` plan set; versioned via PR `docs/milestone-2-planning-review`).
+**Date:** 2026-08-05
+**Status:** **DRAFT — pending Project Owner review/approval. No implementation begins from this document.**
+**Prepared by:** Implementation agent, per governed Phase 2 process (planning/verification only).
+**Controlling references:** `17-final-execution-roadmap.md` §3 (Phase 2, WP-015…WP-024) and §5 (M2); `14-development-phase-roadmap.md` §5 (Phase 2); `06-backend-development-plan.md` (backend build sequence); `05-database-implementation-plan.md` §4 (migration order); `18-implementation-verification-plan.md` §2.1 (evidence: Produced → Passed → Signed); `21-quality-gate-checklist.md` §4 (G2).
+
+---
+
+## 1. Purpose and Scope
+
+This document is the **execution plan for Milestone 2 (Phase 2 — Backend Core)**. It is produced **before any code is written** so that the sequence, tasks, evidence, and boundaries can be reviewed and approved as a package.
+
+**Scope (approved work packages):** WP-015…WP-024 per `17` §3 Phase 2, plus the **Migration 001 baseline** (authorized by Project Owner 2026-08-05 for future Milestone 2 implementation).
+
+**In scope activities:** schema migrations 001–004 (see §6), the API platform foundation (WP-015), event bus platform packages + scheduler (WP-024, split 24a/24b per §4), and the backend services behind the `/v1/` platform (WP-016…WP-023). All work lands on a `develop` branch via PRs; no production deployment.
+
+**Explicitly OUT of scope (not started by this plan):** WhatsApp platform (Phase 4, WP-033…044), AI/RAG (Phase 5), mobile app (Phase 6), admin dashboard (Phase 7), research pipeline (Phase 8), full Phase 3 security completion (WP-025…032 — only baseline security patterns apply during Phase 2), Qdrant population, production deployment, and procurement (WP-006).
+
+---
+
+## 2. Authorization Status and Boundaries
+
+| Item | State |
+| --- | --- |
+| Gate G1 | **Accepted/Granted** 2026-08-05 (ruleset `20422621`, Quality CI green) |
+| Phase 2 authorization | **FULL AUTHORIZATION GRANTED** 2026-08-05 (Project Owner) for WP-015…WP-024 with approved work packages; **implementation not started** |
+| Migration 001 | **AUTHORIZED for future Milestone 2 implementation only** (Project Owner) — no schema exists yet |
+| M-01 (cloud provider) | **Approved/Closed** — GCP, cloud-agnostic |
+| M-02…M-07 | **Open** — Phase 2 relevance handled by draft decision **M-08** (`decision-log.md` §1.2, pending Project Owner signature); see §10 items 1–2 |
+| G1-05 STRIDE / G1-06 DPIA | **Approved by Project Owner** (draft evidence preserved) |
+| `develop` branch | **Does not exist** — must be created + pushed per governance before Phase 2 deploys (§9) |
+
+**Boundary rule:** this plan authorizes **planning only**. Execution starts only after the Project Owner approves this plan (§11), and every step lands through the governed PR path (§9).
+
+---
+
+## 3. Execution Principles (non-negotiable)
+
+1. **Evidence model:** a work package closes only when its artifacts are **Produced → Passed → Signed** (`18` §2.1). No narrative closure.
+2. **Follow the authoritative plans:** `05` governs schema/migrations; `06` governs backend service sequencing; `14` §5 governs Phase 2 acceptance; SRS §12.1 governs API conventions. Where documents conflict, this plan flags the conflict (§10) rather than silently choosing.
+3. **Cross-cutting controls from day one (`02` §5):** idempotency, observability, EN/AM-ready field design, no-PII logs, ownership checks on every endpoint.
+4. **Contract-first:** OpenAPI 3.x specs in `packages/api-spec/` are the source of truth; endpoints are added to the spec before code (AR-003).
+5. **No production data in lower environments (AR-009);** secrets only via env/secret manager (NFR-022).
+6. **Quality gates per merge:** lint, typecheck, tests + coverage floors (QR-002), build, SAST, contract lint, secret scan — the existing CI `Quality` job gates every PR.
+
+---
+
+## 4. Execution Sequence
+
+The roadmap's WP registry order (WP-015…WP-024) is **not** the execution order. Execution follows hard prerequisites (`17` §3). WP-024 is split into **24a (platform packages — bus client, outbox relay, idempotency)** which is a hard prerequisite of WP-016 (its exit evidence requires auth events visible on the bus, `06` Phase B), and **24b (scheduler service)** which is a soft dependency consumed by WP-021 only.
+
+| Step | Work | Hard prerequisites | WPs covered |
+| --- | --- | --- | --- |
+| 1 | **Migration baseline** — migrations 001…004 (`05` §4.2) | WP-013 tooling (exists), authorization | WP-013 continuation |
+| 2 | **API platform foundation** — `/v1/` routing, bearer auth middleware, rate limiting, idempotency keys, common OpenAPI + per-service specs | G1 (accepted), Step 1 | **WP-015** |
+| 3 | **Event bus platform packages (24a)** — `packages/events` (bus client + outbox relay), `packages/idempotency` (consumer dedup store) | Step 2, Step 1 | **WP-024 (24a)** |
+| 4 | **Auth service (initial)** — OTP request/verify + access/refresh tokens | Steps 2, 3, 1 | **WP-016** |
+| 5 | **User & profile service** | Step 4 | **WP-017** |
+| 6 | **Consent lifecycle service** | Step 4 | **WP-018** |
+| 7 | **Pregnancy engine** | Step 5 | **WP-019** |
+| 8 | **Content service / CMS foundation** | Steps 5, 6 | **WP-020** |
+| 9 | **Journal service** | Step 5 | **WP-022** |
+| 10 | **Checklist & budget service** | Step 5 | **WP-023** |
+| 11 | **Scheduler service (24b)** — leader election, job registry, retry/DLQ, run-id binding; parallelizable off critical path | Step 3, Step 1 | **WP-024 (24b)** |
+| 12 | **Reminder engine (foundation)** — template engine + scheduler integration | Steps 7, 11 | **WP-021** |
+| 13 | **M2 exit verification** — UC-001 E2E, idempotency replay, coverage floors, OpenAPI validation, evidence registry | Steps 1–12 | Milestone 2 exit |
+
+Steps 5–11 may overlap after Step 4 lands (off critical path), consistent with `14` §14; Step 11 (24b scheduler) must land before Step 12 (WP-021).
+
+---
+
+## 5. Work Package Breakdown
+
+Each WP below records: objective, tasks, files, tests, and the **verification evidence** that closes it. Requirement anchors are from `17` §3 / `14` §5 / `06`.
+
+### 5.1 Migration baseline (WP-013 continuation)
+
+- **Tasks:** create migrations under `packages/db/migrations/` per `05` §4.2 numbering:
+  - `001` `extensions-and-schemas` — `pgcrypto`, `pg_trgm`, `fn_research` schema, research roles (AR-013 scaffolding).
+  - `002` `users-and-profiles` — `users`, `profiles` (FR-001…010; phone encryption columns + HMAC digest).
+  - `003` `pregnancies-and-babies` — `pregnancies`, `babies` (FR-031…037; `edd`/`lmp` constraint, week 1–45 check).
+  - `004` `consents-and-preferences` — `consents` (append-only, AR-012), `user_preferences` (FR-038).
+- **Files:** `packages/db/migrations/001-*.ts` … `004-*.ts`; `packages/db/test/migration*.test.ts`.
+- **Tests:** `migrate:up` → schema objects exist + FK/check constraints; `migrate:down` rolls back cleanly; consent immutability (no UPDATE allowed) at DB layer; CI `db-baseline` job still green.
+- **Evidence:** migration run/rollback logs (compose postgres + CI ephemeral), schema-constraint test report, `pgmigrations` row set.
+- **Requirements:** FR-001…010, FR-031…038, FR-164, AR-011, AR-012, AR-013.
+
+### 5.2 WP-015 — API platform foundation
+
+- **Tasks:**
+  - Gateway: register `/v1/` prefix; add bearer/JWT pass-through middleware (validation in WP-016; middleware contract first); CORS allow-list (`§12.1`); gateway rate limiting via Redis token bucket (default 120 req/min/user, AI 30, admin export 10 — configurable) returning `429` + `Retry-After` (FR-169).
+  - Idempotency: `Idempotency-Key` required on state-changing writes; Redis-backed key → response store (TTL 24 h default) (FR-161).
+  - OpenAPI: extend `packages/api-spec/openapi/` with `common.yaml` (error envelope, pagination, security schemes) and per-service specs `auth.yaml`, `users.yaml`, `content.yaml`, `checklists.yaml`, `budget.yaml`, `journal.yaml` skeletons; contract lint in CI (AR-003).
+  - Standard error envelope everywhere via existing `packages/errors` (`06` §3.2; already partially live in gateway).
+  - Pagination convention: `limit`/`offset` + `cursor` response shape (`06` §3.3).
+- **Files:** `services/gateway/src/` (routes/middleware/plugins), `packages/api-spec/openapi/*`, `packages/idempotency/` (or gateway-local first, promoted in WP-024).
+- **Tests:** gateway rate-limit test (429 + Retry-After), idempotent replay returns stored response, CORS allow-list, contract lint green, `/healthz` `/readyz` unchanged.
+- **Evidence:** rate-limit/idempotency test reports; OpenAPI spec validated; `/v1/` smoke.
+- **Requirements:** AR-003, FR-153, FR-159, FR-161, FR-169, NFR-020.
+
+### 5.3 WP-024 — Event bus + outbox + scheduler
+
+**Split (R4 from the planning review):** **24a — platform packages** (`packages/events`, `packages/idempotency`) is a hard prerequisite of WP-016: `06` Phase B evidence requires auth events (`user.authenticated`, `token.revoked`) visible on the bus. **24b — scheduler service** is a soft dependency consumed by WP-021 only; it may run parallel to Steps 5–10 and must land before Step 12. Roadmap `17` §3 hard prereqs: WP-024 = WP-015+WP-013; WP-016 = WP-013+WP-015 (WP-024 is **not** a hard prereq of WP-016).
+
+- **Tasks:**
+  - `packages/events` (24a): bus client + **outbox relay** — domain writes + event publication in one local transaction; relay publishes to the bus (`06` §2.2).
+  - `packages/idempotency` (24a): consumer dedup store (event `id` as idempotency key); scheduler run-id binding (FR-163).
+  - Scheduler service skeleton (24b): leader election, job registry, retry/DLQ, run-id binding (FR-163).
+  - Canonical event vocabulary from `03` §4.6 (e.g., `user.enrolled`, `user.consent.changed`, `pregnancy.week.changed`, `message.inbound` reserved for Phase 4).
+- **Files:** `packages/events/src/*`, `packages/idempotency/src/*`, `services/scheduler/` skeleton, `docker-compose.yml` (scheduler service), tests.
+- **Tests:** outbox relay publishes exactly once per committed row; consumer dedup test replays events → no duplicates; scheduler duplicate-run idempotency test; DLQ handling (`12` §16 I-13, G2-10 prep).
+- **Evidence:** **event-bus idempotency replay test showing no duplicates** (M2 exit item), outbox integrity integration test, scheduler run-id test.
+- **Requirements:** FR-014…016, FR-160, FR-161, FR-163, AR-007, G2-10.
+
+### 5.4 WP-016 — Auth service (initial)
+
+- **Tasks:** OTP request/verify with constant-time compare, 5 attempts / 15 min lockout, expiry (FR-005, §12.2); short-lived JWT access tokens (default 15 min) + refresh tokens (default 30 days) with rotation reserved for Phase 3 (`06` Phase B). OTP/token state storage follows the pending auth-state storage decision (`05` §4.3); **no OTP/token values in plaintext**.
+- **Migrations:** auth tables (`otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa` placeholder) — **placement pending** the auth-state storage decision (`05` §4.3); see §10 items 3.
+- **Files:** `services/auth/` (routes/services/repositories/providers), `packages/api-spec/openapi/auth.yaml`, gateway auth middleware wiring, tests.
+- **Tests:** OTP expiry/lockout; constant-time compare; token claims; refresh rotation + reuse ⇒ revoke family; no OTP/PII in logs (asserted in tests).
+- **Evidence:** §12.2 flow green in integration suite; lockout test demonstrates 5-attempt cap; coverage ≥80% core on `services/auth`; `auth.yaml` contract green.
+- **Requirements:** FR-005, FR-009, FR-127, NFR-018, §14.6.
+
+### 5.5 WP-017 — User & profile service
+
+- **Tasks:** profile CRUD; EDD/LMP capture routed to pregnancy engine contract (stubbed until WP-019); UUID identity (FR-009); cohort/referral tagging (FR-010); preferences (FR-038); emits `user.enrolled`, `user.profile.updated` via outbox. Ownership checks on every endpoint (self-scoped).
+- **Files:** `services/users/`, `packages/api-spec/openapi/users.yaml`, tests (unit/integration/contract).
+- **Tests:** field validation; consent versioning hook; preference enums; masked phone in any listing (QR-009 prep); no-PII logs.
+- **Evidence:** `/v1/users/me` CRUD green; enrollment event visible on bus consumed by stub consumer; coverage ≥80% core.
+- **Requirements:** FR-001, FR-002, FR-006, FR-008, FR-009, FR-010, FR-038, FR-126.
+
+### 5.6 WP-018 — Consent lifecycle service
+
+- **Tasks:** versioned immutable consent capture; withdrawal (409 if already withdrawn); re-consent; participation/research/media/WhatsApp-opt-in types (FR-117); `user.consent.changed` events; DB-level append-only enforcement (AR-012).
+- **Files:** extend `services/users/` consent module (or separate `services/consent`), `users.yaml` consents paths, tests.
+- **Tests:** full lifecycle grant → withdraw → proof; consent immutability test (no UPDATE on `consents`); withdrawal idempotency; privacy no-over-collection (FR-124).
+- **Evidence:** consent immutability test passes; `user.consent.changed` consumed by stub consumer; coverage ≥80% core.
+- **Requirements:** FR-003, FR-004, FR-117, FR-125, FR-128, AR-012.
+
+### 5.7 WP-019 — Pregnancy engine
+
+- **Tasks:** week/trimester auto-computation from EDD/LMP (edge cases: leap years, LMP vs EDD, week 40+); milestone derivation; countdown; recompute-on-edit (FR-006); emits `pregnancy.week.changed`. Pure domain logic, no public §12 endpoints — internal contract consumed by users service + later by WhatsApp/AI.
+- **Files:** `services/pregnancy/` (or in-process package), `packages/api-spec/openapi/` internal contract, tests.
+- **Tests:** week/trimester math across edge dates; milestone derivation; recompute idempotency; contract tests against users service.
+- **Evidence:** pregnancy-engine test report (edge-date matrix); recompute event observed.
+- **Requirements:** FR-031, FR-032, FR-033, FR-037, FR-006.
+
+### 5.8 WP-020 — Content service / CMS foundation
+
+- **Tasks:** content CRUD with `content_versions` snapshots; draft → medical review → approved → publish → archive state machine; EN/AM localization fields with parity check (FR-079); medical-review tagging (FR-081); segregation of duties — author ≠ medical approver (FR-106); content search (FR-083). Clinical approval (QR-019 / D-04) is a **program dependency for publish, not for build** (`06` Phase D).
+- **Files:** `services/content/`, `packages/api-spec/openapi/content.yaml`, `packages/i18n/` (EN/AM scaffolding), tests.
+- **Tests:** SoD test green; workflow E2E; archive removes from search + emits retirement event; localization parity check fails on missing Amharic body; contract green.
+- **Evidence:** CMS workflow E2E test report; SoD test; EN/AM parity test; coverage ≥80% core.
+- **Requirements:** FR-076…085, FR-106, AR-015.
+
+### 5.9 WP-022 — Journal service
+
+- **Tasks:** text/voice/photo entries, private-by-default (FR-052), prompt-linked auto-entries (FR-053), sharing flag (FR-039), export (FR-057). Voice/photo media pipeline deferred to Phase 4 (WP-039); this phase stores metadata + text only.
+- **Files:** `services/journal/`, `packages/api-spec/openapi/journal.yaml`, tests.
+- **Tests:** privacy-by-default (entry invisible without ownership); export job produces portable artifact per FR-057/FR-128; prompt-linked dedup (FR-161).
+- **Evidence:** journal E2E test report; export artifact audited; ownership-scope test.
+- **Requirements:** FR-051…058, FR-126.
+
+### 5.10 WP-023 — Checklist & budget service
+
+- **Tasks:** hospital-bag/birth-prep checklists + custom items + progress (FR-086, FR-088); budget tracker planned/actual/variance with configurable cap (M-07 — see §10 item 2); progress maintained on write (avoid N+1, NFR-007).
+- **Files:** `services/checklists/`, `packages/api-spec/openapi/checklists.yaml` + `budget.yaml`, tests.
+- **Tests:** checklist progress math; budget variance + cap enforcement; ownership scope.
+- **Evidence:** checklist/budget test reports; coverage ≥80% core.
+- **Requirements:** FR-086, FR-087, FR-088, M-07.
+
+### 5.11 WP-021 — Reminder engine (foundation)
+
+- **Tasks:** template engine + scheduler integration on WP-024 scheduler; quiet hours (FR-029, FR-043); critical-priority bypass (FR-046); per-user outbound cap (3–5 non-interactive messages/day configurable); dedup across channels reserved (FR-048). Channel dispatch providers deferred (needs M-02 / Phase 4 message gateway) — this phase generates + schedules + tracks, dispatch is a stub with test-double.
+- **Files:** `services/reminders/`, `packages/api-spec/openapi/` internal contract, scheduler job definitions, tests.
+- **Tests:** lead-time scheduling; quiet-hour math; critical bypass; duplicate-run idempotency (FR-163/161); per-user cap.
+- **Evidence:** schedule → dispatch(ack via test-double) → ack flow green against Postgres; duplicate-run no-duplicates test.
+- **Requirements:** FR-041, FR-044, FR-047, FR-029, FR-043, FR-046, FR-163.
+
+---
+
+## 6. Database Migration Schedule
+
+| Migration | Creates | When (step) | Authorization |
+| --- | --- | --- | --- |
+| 001 `extensions-and-schemas` | `pgcrypto`, `pg_trgm`, `fn_research` schema, research roles | Step 1 | **Granted** 2026-08-05 |
+| 002 `users-and-profiles` | `users`, `profiles` | Step 1 | Covered by Phase 2 authorization |
+| 003 `pregnancies-and-babies` | `pregnancies`, `babies` | Step 1 | Covered |
+| 004 `consents-and-preferences` | `consents`, `user_preferences` | Step 1 | Covered |
+| auth tables (proposed) | `otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa` | Step 4 | **Pending decision — `05` §4.3 + §10 item 3 (DB architect; M-08)** |
+| Later-phase migrations (005…) | prompts, journal, content, campaigns, ai, notifications, audit_logs, research, seed | Phase 2 steps 5–11 / later phases | Out of this plan's migration-001 baseline |
+
+Note: `audit_logs` (migration 015 per `05` §4.2) is deferred to Phase 3 (WP-027); Phase 2 applies access logging (FR-127) at the application layer.
+
+---
+
+## 7. Platform Packages to Create
+
+| Package | Purpose | Step |
+| --- | --- | --- |
+| `packages/events` | bus client + outbox relay | 3 (24a) |
+| `packages/idempotency` | Redis idempotency store + consumer dedup | 2–3 (24a) |
+| `packages/i18n` | EN/AM localization scaffolding | 8 |
+| `services/scheduler` | scheduler service skeleton (leader election, registry, retry/DLQ) | 11 (24b) |
+
+Existing packages reused: `config`, `errors`, `logger`, `test-utils`, `db`, `api-spec`. Redis and Postgres are already in the compose stack.
+
+---
+
+## 8. Verification and Milestone 2 Exit Criteria
+
+**M2 exit criteria (`17` §5, `14` §5):**
+
+| Criterion | How proven | Evidence artifact |
+| --- | --- | --- |
+| UC-001 E2E green (registration → OTP → versioned consent → UUID → pregnancy-week computation) | E2E/integration run of the critical journey | UC-001 E2E report (QR-004 journey 1) |
+| QR-002 coverage floors (≥80% core, ≥70% overall) | CI coverage gate | Coverage report per service |
+| OpenAPI contracts committed + validated | Contract lint + spec validation | `packages/api-spec/` committed, `contract:lint` green |
+| Event-bus idempotency replay shows no duplicates (FR-161) | Replay test on outbox + consumers | Idempotency replay test report |
+| Phase 2 migrations applied + reversible | migrate up/down logs (compose + CI) | Migration logs |
+
+**Partial G2 evidence produced in Phase 2 (full G2 only after Phase 3):** G2-10 (idempotency + event integrity), G2-11 (coverage floors), G2-03 partial (access-logging foundation FR-127). G2-01/02/04/05/06/07/08/09/12 require WP-025…032 (Phase 3) — not claimed here.
+
+**Update rule:** `implementation-status.md` WP-015…WP-024 rows move S → IP → IV → C as evidence passes (`18` §2.1); every closure records artifact path + commit SHA + requirement IDs.
+
+---
+
+## 9. Branch / PR / Deploy Strategy
+
+1. **Create + push `develop`** branch from `main`. This is not a new workflow chosen by this plan — it is an **existing governance requirement**: SRS §16.2 + `04` §20 (staging on `develop`), `12` §5.2 + `architecture-baseline.md` (feature → `develop` → `main`, NFR-039 branch/PR workflow), and `repository-bootstrap-order.md` line 25 whose completion criterion ("`main` + `develop` exist, `main` protected, no code yet") was **not met** — creating `develop` closes that bootstrap gap. Required: 1 approving review (separate account; PR author cannot self-approve), Quality CI green, linear history — ruleset `20422621` applies. `develop` should also receive branch protection per `12` §5.4.
+2. **All Phase 2 work lands on `develop`** via small, reviewable PRs (one WP or sub-step each). Never push directly to `main` (ruleset blocks; linear history).
+3. **CI:** existing `Quality` job gates every PR (lint/typecheck/tests+coverage/build/SAST/contract lint/audit/secret scan). `db-baseline` validates migrations on ephemeral postgres.
+4. **Deployment:** `Deploy to staging (develop)` job becomes active once `develop` exists (currently skipped). **No production deployment** — `main` deploy stays parked at the manual-approval gate with placeholder steps.
+5. **Evidence cadence:** every merged PR records its artifacts; M2 exit review is a checkpoint (not a gate) — `G2` remains Not Started until Phase 3.
+
+---
+
+## 10. Open Items Requiring Review/Decision Before Execution
+
+1. **M-02…M-07 open vs roadmap §2.1 rule.** `17` §2.1 states no code work begins until all seven M-decisions close. The Project Owner's 2026-08-05 full Phase 2 authorization is the governing override for WP-015…WP-024. **Handling path:** draft decision **M-08** ("Phase 2 open-decision handling + provider-agnostic test-doubles") recorded in `decision-log.md` §1.2 — **pending Project Owner signature**; Phase 2 implementation is gated on its closure. WP-016 OTP delivery channel and WP-021 channel dispatch use **provider-agnostic test-doubles**; WP-023 budget cap reads **M-07 default** (`20` reference) as configurable.
+2. **M-07 budget cap default** — needed as a configurable value for WP-023; adopt the `20` reference default and confirm with Project Owner at WP-023 start (also covered by M-08 §1.2).
+3. **Auth tables not in `05` §4.2.** `otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa` (required by WP-016 per `06` Phase B) are absent from the `05` migration table and the SRS §13.3 catalog. **Handling path:** deferred to DB architect — `05` §4.3 documents both storage options (A. Redis-only per `03`/`11`; B. Redis + Postgres record). If B is chosen, append as migration `018` (avoids renumbering 003–017; note `005` is already `prompts`) and update `05` §4.2 + `06` Phase B. **Requires DB architect sign-off + decision-log entry + Project Owner visibility.**
+4. **Migration numbering conflict between `06` §4 ("Migration `000N`") and `05` §4.2 (001–017).** **RESOLVED in this documentation PR:** `06` §4 now references `05` §4.2 IDs and records the rule that engineering tables beyond the `05` catalog require a `05` §4.2 update + approval; `17` §3 WP-013 reworded to match. No `000N` sequence remains.
+5. **`audit_logs` deferral.** `05` migration 015 creates the immutable audit table (Phase 3, WP-027). Phase 2 ships FR-127 access logging at the app layer. Confirm this deferral is acceptable (no DB-level append-only audit until Phase 3).
+6. **`develop` branch creation** requires a push + PR approval (separate account) — the same self-approval constraint as PR #3. It closes the unmet `repository-bootstrap-order.md` completion criterion; governed by SRS §16.2 / `12` §5.2 (see §9).
+7. **Content service clinical review (D-04 / QR-019)** is a program dependency for *publishing*, not for *building* WP-020. Confirm the clinical reviewer engagement is scheduled ahead (R-04 mitigation).
+8. **Engineering tables beyond the `05` §4.2 catalog.** Several `06` phase table lists include additions not in `05` §4.2 or the SRS §13.3 catalog (e.g., `reminder_templates`, `shared_journey_links`, `data_export_jobs`, `deletion_requests`, `cohort_tags`, `whatsapp_templates`, `support_tickets`, `research_export_jobs`). These must be added to `05` §4.2 with schema approval + decision-log entry before their phase lands (note added in `06` §4). Flag for DB architect review alongside item 3.
+
+---
+
+## 11. Review Gate for This Plan
+
+This document is a **draft**. Before any code is written, the Project Owner should:
+
+- [ ] Confirm the scope (§1) and boundaries (§2).
+- [ ] Approve or amend the execution sequence (§4) and WP breakdown (§5).
+- [ ] Resolve open items (§10) — at minimum items 1 (M-08 signature), 3 (auth-storage), and 6 (develop) before Steps 1/4.
+- [ ] Record the plan approval and the M-08 decision in `decision-log.md` and `implementation-status.md` §9 update log.
+
+**Until then: no implementation, no commits, no pushes.**
+
+---
+
+**END OF DRAFT — Milestone 2 Implementation Plan.** Next executable step is conditional on this plan's approval: create `develop`, land migration baseline (001–004), then WP-015 → WP-024 per §4, with M2 exit evidence per §8.

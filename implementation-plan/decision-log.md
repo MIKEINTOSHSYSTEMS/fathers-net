@@ -40,6 +40,21 @@ Closure per Section 5 rules (approver, date, decision, ADR reference, affected P
 | **Co-approvers** | Product/Leadership + DevOps (per §1 approver column) |
 | **Notes** | Cloud-agnostic architecture decision is permanent per Section 5 change control; any later provider addition is a new decision-log entry, never a silent edit. |
 
+### 1.2 M-08 Draft — Phase 2 Open-Decision Handling (PENDING Project Owner signature)
+
+Drafted by the Milestone 2 planning review (PR `docs/milestone-2-planning-review`). Records how the Project Owner's 2026-08-05 full Phase 2 authorization (WP-015…WP-024) interacts with the §1 preamble rule "no provider-dependent build begins before the relevant M-decision is closed" and the `21` G1-02 "all M-decisions closed" item. **DRAFT — no closure record until the Project Owner signs.** Per Section 5 rule 5, a decision blocked at the named approver escalates via `17` §9; Phase 2 implementation remains gated on this closure.
+
+| M-08 | Phase 2 open-decision handling + provider-agnostic test-doubles |
+| --- | --- |
+| **Status** | **Draft — pending Project Owner signature** (NOT closed) |
+| **Decision (proposed)** | (1) Phase 2 (WP-015…WP-024) executes behind **provider-agnostic adapters + test-doubles** consistent with AR-004/FR-149 and the M-01 cloud-agnostic precedent — no provider-coupled code lands in Phase 2. (2) **M-07** adopted at the `20` reference default as a configurable budget cap for WP-023. (3) **M-02** OTP delivery channel uses an adapter + test-double; the final provider is deferred to Phase 4 procurement (D-01). (4) **M-03/M-04/M-05/M-06** remain Open and are consumed only at their documented phases. (5) This entry records the Project Owner's Phase 2 authorization as the governing override of the literal "all seven closed before code" rule **for Phase 2 only**; `21` G1-02 relaxation noted. |
+| **Approver** | **Project Owner (signature pending)** |
+| **Evidence** | Full Phase 2 Authorization governance record 2026-08-05; `17` §2.1; `21` G1-02; `06` Phase B (OTP adapter, M-02 line); `06` line 794 (M-07 at Phase F) |
+| **Affected risks closed/reduced** | PM-49 partially reduced (M-02…M-07 still Open); PM-08/PM-55/PM-56 preserved via adapters |
+| **Dependent phase unlocked** | Phase 2 / Milestone 2 (WP-015…WP-024) business implementation |
+| **Co-approvers** | DB architect (R1 auth-storage decision), Technical Lead |
+| **Notes** | `05` §4.3 holds the pending auth-state storage decision; `staff_users`/`staff_mfa` may be decided separately from the OTP/refresh-token store. |
+
 ---
 
 ## 2. Confirmed SRS Decisions (Reference — ADR-001…ADR-006)
