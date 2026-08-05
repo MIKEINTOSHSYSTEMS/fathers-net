@@ -22,7 +22,7 @@
 - **Dependencies:** Step 0; GitHub organization/account (WP-006).
 - **Deliverables:** Empty monorepo; `README.md`; `.gitignore`; `LICENSE`; root `.editorconfig`; branch protection draft (`12` §5.4).
 - **Verification evidence:** Repo URL; branch-protection config; README committed.
-- **Completion criteria:** `main` + `develop` exist, `main` protected, no code yet.
+- **Completion criteria:** `main` + `develop` exist, `main` protected (ruleset `20422621`; sole-maintainer bypass permitted under AGD-002 — `decision-log.md` §7 — while a second account is unavailable), no code yet.
 
 ---
 

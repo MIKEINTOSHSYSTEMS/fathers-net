@@ -597,7 +597,7 @@ jobs:
 
 ### 5.3 PR Checks
 
-Every pull request to `develop`/`main` runs: lint (NFR-039), unit + integration tests, coverage floors (QR-002), dependency audit, SAST (semgrep), secret scan (trufflehog), contract tests (QR-005), and an E2E smoke of the critical journey (QR-004). Required reviews (NFR-039 "defined branch/PR workflow"): at least one approving review; changes touching AI prompts/security-sensitive paths require a second reviewer. Status checks are required for merge; `main` additionally requires all staging checks green (QR-013).
+Every pull request to `develop`/`main` runs: lint (NFR-039), unit + integration tests, coverage floors (QR-002), dependency audit, SAST (semgrep), secret scan (trufflehog), contract tests (QR-005), and an E2E smoke of the critical journey (QR-004). Required reviews (NFR-039 "defined branch/PR workflow"): at least one approving review; changes touching AI prompts/security-sensitive paths require a second reviewer. **Solo-maintainer exception (AGD-002, `decision-log.md` §7):** while only one account exists, the sole maintainer may merge own PRs via a rule-scoped ruleset `20422621` bypass — a documented exception, NOT an independent review; security-sensitive changes still require documented Project Owner sign-off + mandatory CI; contributor PRs keep the 1-approval / second-reviewer rules. Status checks are required for merge; `main` additionally requires all staging checks green (QR-013).
 
 **Attribute** | **Value**
 --- | ---
@@ -636,7 +636,7 @@ As specified in §5.2 `security` job: dependency scanning (`npm audit --omit=dev
 ### 5.6 Approval Gates
 
 - **Environment protection:** production deployment runs in a GitHub Actions `environment: production` with environment protection rules (required reviewers) and the manual approval step from §16.2 (`trstringer/manual-approval@v1` with `DEPLOY_APPROVAL`).
-- **Segregation of duties:** the deployer who merges to `main` is not the sole approver; §14.7's author != approver principle extends to deployments (OR-005 change management).
+- **Segregation of duties:** the deployer who merges to `main` is not the sole approver; §14.7's author != approver principle extends to deployments (OR-005 change management). **Exception under AGD-002 (`decision-log.md` §7):** while only one account exists, the sole maintainer may merge own changes under the documented ruleset bypass; segregation of duties resumes when a second account exists.
 - Staging deployment is automatic; production is manual-approved and canary-gated (§5.7). QR-013 gates apply before promotion.
 
 **Attribute** | **Value**

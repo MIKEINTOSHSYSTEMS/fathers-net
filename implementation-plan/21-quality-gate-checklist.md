@@ -77,6 +77,7 @@ Recorded per the Full Phase 2 Authorization governance task (documentation-only)
 | G1-06 DPIA | **Approved by Project Owner** | Project Owner | 2026-08-05 | Draft evidence preserved at `verification/audits/dpa/dpia-draft.md`; no independent privacy reviewer sign-off claimed |
 | G1-02 Decision log closure | **M-01 closed (partial)** | Project Owner | 2026-08-05 | M-01 Approved/Closed — GCP initial production provider, cloud-agnostic architecture (`decision-log.md` §1.1); M-02…M-07 still Open, so full G1-02 remains unsatisfied |
 | G1-12 Migration 001 | **Authorized for future Milestone 2 implementation only** | Project Owner | 2026-08-05 | Not created and not applied in this task; no schema/tables authorized by this record |
+| AGD-002 | **Solo Maintainer Merge Policy approved** | Project Owner | 2026-08-05 | Recorded in `decision-log.md` §7; ruleset `20422621` sole-maintainer bypass verified (actor `MIKEINTOSHSYSTEMS` id `37907891`, `always`); security-sensitive sign-off path documented; does not alter this checklist's evidence or signer rules for contributors |
 
 **Source:** `14` §3/§4 (Phase 0–1 acceptance + evidence); `17` WP-001…WP-014; `18` §7. **Classification:** Confirmed (items anchored to SRS/plan obligations), Recommended (checklist granularity). **Confidence:** High. **Reasoning:** Each item resolves to a named Phase 0/1 deliverable from `14` and a signer from `18` §10; the checklist is a transposition, not a new standard. **Impact-if-changed:** Adding/removing an item changes Phase 0/1 scope and must be reflected in `14` §3–§4 and `17` WP-001…WP-014 together.
 
@@ -163,7 +164,7 @@ All G3-01…G3-17 pass; go/no-go signed; gate state = **Granted**; founding coho
 | G3 | Program + leadership (go/no-go) | QA Lead, Security, Healthcare & Content, DevOps | QA Lead, Security, or Healthcare & Content may hold |
 | M0…M9 milestones | Per `14` §15 owner | Program Manager | Per milestone |
 
-Sign-off rule: a gate is not closed without the required signatures; QA validity review precedes every signature (`18` §10.1, V-10). Segregation of duties (FR-106): no signer signs the evidence they produced alone.
+Sign-off rule: a gate is not closed without the required signatures; QA validity review precedes every signature (`18` §10.1, V-10). Segregation of duties (FR-106): no signer signs the evidence they produced alone. **Solo-maintainer exception (AGD-002, `decision-log.md` §7):** while only one account exists, the sole maintainer may sign their own gate evidence under the documented governance exception; segregation of duties resumes when a second account exists.
 
 **Source:** `18` §10; `14` §15; FR-106. **Classification:** Confirmed (matrix structure), Recommended (named roles from `15` §2.2). **Confidence:** High. **Impact-if-changed:** Re-assigning a signer changes the accountability map in `18` §10; both documents update together.
 
