@@ -4,5 +4,5 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "exclude": ["test/**", "**/*.test.ts"]
+  "exclude": ["test/**", "**/*.test.ts", "migrations/**"]
 }

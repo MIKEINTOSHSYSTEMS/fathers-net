@@ -114,6 +114,9 @@ jobs:
       - name: Apply migration baseline on ephemeral DB
         run: npm run migrate:up --workspace=@fathersnet/db
 
+      - name: Migration integration tests (up/down, constraints, immutability)
+        run: npm run test:migrations --workspace=@fathersnet/db
+
       - name: Verify migration tracking table exists
         run: npm run migrate:check --workspace=@fathersnet/db | grep '"tableExists":true'
 
