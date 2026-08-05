@@ -25,5 +25,8 @@
     "@fathersnet/errors": "*",
     "@fathersnet/logger": "*",
     "fastify": "5.11.2"
+  },
+  "devDependencies": {
+    "@fathersnet/test-utils": "*"
   }
 }
