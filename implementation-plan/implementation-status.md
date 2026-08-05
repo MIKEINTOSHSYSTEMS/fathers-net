@@ -72,7 +72,7 @@
 | Milestone | Checkpoint (`14` §15) | State | Gate |
 | --- | --- | --- | --- |
 | M0 | Phase 0 baseline & decisions approved | **Not Started** | G1 package |
-| M1 | Phase 1 foundation live | **In Verification** (2026-08-05 gate passed; awaiting signature + Phase 2 authorization) | Gate 1 |
+| M1 | Phase 1 foundation live | **Committed locally** `b616224` (2026-08-05 gate passed; committed as `chore(repo): Milestone 1 repository foundation`; awaiting remote push authorization + final sign-off, then Phase 2 authorization) | Gate 1 |
 | M2 | Phase 2 backend core functional | **Not Started** | Internal |
 | M3 | Phase 3 security complete | **Not Started** | Gate 2 |
 | M4 | Phase 5 channels integrated | **Not Started** | Internal |
@@ -314,10 +314,11 @@ Full register: `16-risk-management-plan.md` §3.
 | 2026-08-05 | Repository Governance Resolution | AGD-001 recorded in decision-log §7; permanent docs (SRS + implementation-plan set + README + LICENSE) staged for tracking; working/runtime artifacts ignored |
 | 2026-08-05 | Milestone 1 Verification Gate | M1 (Phase 1 foundation) verified: WP-008/WP-009/WP-011 → In Verification; evidence below. No commit created — staged for human review |
 | 2026-08-05 | Milestone 1 Remediation | Verification findings closed: Fastify FSTDEP023 fixed; devcontainer Docker feature pinned; CI actions SHA-pinned. Evidence below |
+| 2026-08-05 | Milestone 1 Commit + Doc Sync | M1 committed locally as `b616224` (`chore(repo): Milestone 1 repository foundation`, 103 files); this tracker updated to reflect committed state. **Awaiting remote push authorization and final human sign-off.** |
 
 ### Milestone 1 Verification Evidence (2026-08-05 gate)
 
-Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28.5.2, PowerShell 7). No commit SHA yet — changes staged, awaiting human review per Git governance.
+Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28.5.2, PowerShell 7). **Commit:** `b616224` `chore(repo): Milestone 1 repository foundation` — Milestone 1 committed locally; awaiting remote push authorization and final human sign-off.
 
 - **Tooling:** npm workspaces + turbo 2.10.8; TS strict (8/8 typecheck); ESLint 8.57.1 + prettier 3.9.6 format:check green; jest 30.4.2 coverage green (gateway 88.09% lines, all 8 tasks pass); husky pre-commit active.
 - **Build/CI:** `npm run build` 6/6; `npm run audit` 0 vulns (prod deps); `npm run sast` 6/6; `npm run contract:lint` valid (Redocly); `npm run secret:scan` clean; CI workflow YAML valid (quality/staging/production jobs).
@@ -329,8 +330,8 @@ Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28
 
 - **Build/quality (all green after remediation):** `npm run build` 6/6; `npm run typecheck` 8/8; `npm run lint` 6/6; `npm run format:check` all matched files clean; `npm run test:coverage` 8/8 (gateway 88.09% lines); `npm run audit` 0 vulns; `npm run sast` 6/6; `npm run secret:scan` clean.
 - **Docker:** `docker compose config --quiet` valid (default + dev profile); gateway image rebuilt with the Fastify fix; all 5 containers healthy; `/healthz` + `/readyz` 200 direct (3000) and via nginx 8080/8443; gateway container logs free of FSTDEP023/deprecation.
-- **Files changed this remediation:** `.devcontainer/devcontainer.json` (feature + engine pins); `.github/workflows/ci-cd.yml` (SHA pins); `services/gateway/src/app.ts` (logController); `implementation-status.md` (this record). No commit created — still staged for human review.
+- **Files changed this remediation:** `.devcontainer/devcontainer.json` (feature + engine pins); `.github/workflows/ci-cd.yml` (SHA pins); `services/gateway/src/app.ts` (logController); `implementation-status.md` (this record). Committed 2026-08-05 as `b616224`.
 
 ---
 
-**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Milestone 1 approval/sign-off and Gate G1 evidence assembly, or WP-001 kickoff at Phase 0 start (`17` §12.4).
+**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Milestone 1 push authorization + final sign-off and Gate G1 evidence assembly, or WP-001 kickoff at Phase 0 start (`17` §12.4).
