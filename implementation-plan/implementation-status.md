@@ -130,7 +130,7 @@ Full register: `16-risk-management-plan.md` §3.
 | WP-002 | Decision log; close M-01…M-07 | S | | Program |
 | WP-003 | Architecture review/sign-off | S | | Technical Lead |
 | WP-004 | Tech-stack sign-off | S | | Architect |
-| WP-005 | STRIDE + DPIA + processing register | S | | Security |
+| WP-005 | STRIDE + DPIA + processing register | IP | Draft STRIDE + DPIA produced 2026-08-05 (foundation prep): `verification/audits/threat-model/stride-threat-model-draft.md`, `verification/audits/dpa/dpia-draft.md`. **DRAFT — human sign-off pending (G1-05/G1-06).** | Security |
 | WP-006 | Provider/environment procurement | S | | Program |
 | WP-007 | Research ethics groundwork + team/risk baseline | S | | Research + Program |
 
@@ -143,7 +143,7 @@ Full register: `16-risk-management-plan.md` §3.
 | WP-010 | IaC dev/staging/prod | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + WP-006 (Step 7). | DevOps |
 | WP-011 | Local dev environment (compose) | IV | M1 verification gate 2026-08-05: compose stack (postgres/redis/qdrant/gateway/nginx) all healthy; /healthz + /readyz 200 direct (3000) and via nginx 8080/8443; `docker compose config --quiet` valid. | DevOps |
 | WP-012 | Secret manager wired | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires M-01 + Step 12; local secret-scan + pre-commit scanning in place. | DevOps + Security |
-| WP-013 | Migration 001 baseline | IP | Preparation authorized 2026-08-05 (conditional Phase 2). Requires Step 9. | DB Engineer |
+| WP-013 | Migration 001 baseline | IP | Tooling foundation 2026-08-05: `packages/db` (node-pg-migrate runner D-08, `migrate:up|down|check`), empty `migrations/` dir, unit tests, CI `db-baseline` job (ephemeral postgres, creates `pgmigrations` tracking table). **No migration 001 / no schema.** Requires Step 9 + authorization for migration 001. | DB Engineer |
 | WP-014 | Observability + DR skeleton | S | Requires Step 11; not in M1 scope. | DevOps |
 
 ### Phase 2 — Backend Core
@@ -320,6 +320,7 @@ Full register: `16-risk-management-plan.md` §3.
 | 2026-08-05 | Milestone 1 CI Evidence Doc Sync | `9e4c454` docs(status): record Milestone 1 CI remediation evidence (run 30963968046, 13/13; run 30964438595 on `9e4c454` Quality success). |
 | 2026-08-05 | **Gate G1 Human Acceptance** | **Gate G1 ACCEPTED** by human decision. Evidence reviewed and accepted: repository foundation, workspace config, shared package foundation, gateway skeleton, health endpoints, Docker foundation, CI foundation, documentation baseline, CI dependency remediation, GitHub Actions Quality passing, documentation synchronized, main branch governance configured. Ruleset `20422621` verified (PR required, 1 approval, stale-dismissal on, Quality status check required, force-push/deletion blocked, no bypass, admins enforced, conversation resolution on, linear history). **Phase 2 / Milestone 2 remains NOT AUTHORIZED.** |
 | 2026-08-05 | **Phase 2 Conditional Foundation Authorization** | Human granted **CONDITIONAL FOUNDATION AUTHORIZATION ONLY** for Phase 2 — preparation activities allowed: STRIDE review completion, DPIA completion, migration baseline preparation (WP-013), secret management foundation (WP-012), IaC preparation (WP-010), develop branch workflow setup, environment readiness activities. **NOT AUTHORIZED / blocked:** business functionality, user/profile services, pregnancy engine, consent service implementation, content service, reminder engine, journal service, business APIs, mobile app, admin dashboard, production deployment. WP-015…WP-024 business deliverables remain blocked pending M-01…M-07 closure / further authorization. WP-010/WP-012/WP-013 → In Progress (preparation). |
+| 2026-08-05 | **Phase 2 Foundation Preparation Executed** | WP-013 tooling foundation + security/privacy drafts completed (human-approved scope). Changes (working tree, **not committed — awaiting separate authorization**): `packages/db` created (node-pg-migrate 7.9.1 runner, pg 8.13.1, migrate up/down/check, empty `migrations/`, jest unit tests); root `package.json` override `node-pg-migrate→glob 11.1.0` (resolves GHSA-5j98-mcp5-4vw2; `npm audit` clean 0 vulns); `.github/workflows/ci-cd.yml` added `db-baseline` job (ephemeral postgres:16-alpine, validates `pgmigrations` tracking table; quality gate/deploy jobs untouched); STRIDE + DPIA drafts at `verification/audits/threat-model/` and `verification/audits/dpa/` (**DRAFT, not signed — G1-05/G1-06 pending**); WP-005/WP-013 rows updated. Validation: `migrate:up`/`migrate:check` green against compose postgres; checks pending: build/typecheck/lint/format/test:coverage/sast/secret:scan. |
 
 ### Milestone 1 Verification Evidence (2026-08-05 gate)
 
@@ -347,4 +348,4 @@ Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28
 
 ---
 
-**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **Phase 2 CONDITIONAL FOUNDATION AUTHORIZATION granted 2026-08-05** (preparation activities only; WP-015…WP-024 business deliverables remain blocked) — awaiting M-01…M-07 closure and/or full Phase 2 authorization, or WP-001 kickoff at Phase 0 start (`17` §12.4).
+**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **Phase 2 CONDITIONAL FOUNDATION AUTHORIZATION granted 2026-08-05** (preparation activities only) — WP-013 tooling foundation + STRIDE/DPIA drafts produced (not committed; sign-off G1-05/G1-06 and M-01…M-07 closure pending); WP-015…WP-024 business deliverables remain blocked — awaiting M-01…M-07 closure and/or full Phase 2 authorization, or WP-001 kickoff at Phase 0 start (`17` §12.4).

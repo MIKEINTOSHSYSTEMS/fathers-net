@@ -1,0 +1,33 @@
+{
+  "name": "@fathersnet/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Database migration tooling foundation — node-pg-migrate runner + migration directory (05 §4, engineering-standards.md §8)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\"",
+    "migrate": "tsx src/migrate.ts",
+    "migrate:up": "tsx src/migrate.ts up",
+    "migrate:down": "tsx src/migrate.ts down",
+    "migrate:check": "tsx src/migrate.ts check"
+  },
+  "dependencies": {
+    "node-pg-migrate": "7.9.1",
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.11.10",
+    "tsx": "4.23.5"
+  }
+}

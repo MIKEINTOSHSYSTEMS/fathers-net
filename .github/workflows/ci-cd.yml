@@ -66,6 +66,45 @@ jobs:
       - name: Secret scan
         run: npm run secret:scan
 
+  db-baseline:
+    name: DB migration baseline (ephemeral postgres)
+    needs: quality
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fathersnet
+          POSTGRES_PASSWORD: ci-ephemeral-only
+          POSTGRES_DB: fathersnet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fathersnet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://fathersnet:ci-ephemeral-only@localhost:5432/fathersnet
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migration baseline on ephemeral DB
+        run: npm run migrate:up --workspace=@fathersnet/db
+
+      - name: Verify migration tracking table exists
+        run: npm run migrate:check --workspace=@fathersnet/db | grep '"tableExists":true'
+
   staging:
     name: Deploy to staging (develop)
     if: github.ref == 'refs/heads/develop'
