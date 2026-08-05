@@ -1,0 +1,7 @@
+# Compiled artifacts must never land next to the TypeScript migration sources:
+# node-pg-migrate would treat .js files as duplicate migrations. Migrations run
+# from .ts via tsx (packages/db/src/migrate.ts); the build excludes migrations/.
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map

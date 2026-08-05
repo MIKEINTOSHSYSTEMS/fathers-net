@@ -74,7 +74,7 @@
 | --- | --- | --- | --- |
 | M0 | Phase 0 baseline & decisions approved | **In Progress** — M-01 closed 2026-08-05 (GCP, Project Owner); M-02…M-07 open | G1 package |
 | M1 | Phase 1 foundation live | **Accepted/Granted** — Gate G1 accepted 2026-08-05. Committed + pushed `b616224` + `95e4665` + `26acb6e` + `9e4c454` (foundation `b616224`, doc sync `95e4665`, CI dependency remediation `26acb6e`, CI evidence doc sync `9e4c454`); GitHub Actions quality job green (runs 30963968046/30964438595); branch protection active (ruleset 20422621: PR + 1 approval + Quality CI + linear history). Phase 2 / Milestone 2 NOT authorized | Gate 1 |
-| M2 | Phase 2 backend core functional | **In Progress** — full Phase 2 authorization granted 2026-08-05 (Project Owner); **WP-015 in progress** (API platform foundation); WP-016…WP-024 not started | Internal |
+| M2 | Phase 2 backend core functional | **In Progress** — full Phase 2 authorization granted 2026-08-05 (Project Owner); **WP-015 closed** 2026-08-05 (PR #6 → develop `ab2ada6`); migration baseline 001–004 in verification (`WP-013`); WP-016…WP-024 not started | Internal |
 | M3 | Phase 3 security complete | **Not Started** | Gate 2 |
 | M4 | Phase 5 channels integrated | **Not Started** | Internal |
 | M5 | Phase 7 app + admin feature complete | **Not Started** | Internal |
@@ -143,14 +143,14 @@ Full register: `16-risk-management-plan.md` §3.
 | WP-010 | IaC dev/staging/prod | IP | M-01 closed 2026-08-05 (GCP, Project Owner). Execution still requires WP-006 procurement (Step 7). | DevOps |
 | WP-011 | Local dev environment (compose) | IV | M1 verification gate 2026-08-05: compose stack (postgres/redis/qdrant/gateway/nginx) all healthy; /healthz + /readyz 200 direct (3000) and via nginx 8080/8443; `docker compose config --quiet` valid. | DevOps |
 | WP-012 | Secret manager wired | IP | M-01 closed 2026-08-05 (GCP, Project Owner). Requires Step 12; local secret-scan + pre-commit scanning in place. | DevOps + Security |
-| WP-013 | Migration 001 baseline | IP | Tooling foundation 2026-08-05: `packages/db` (node-pg-migrate runner D-08, `migrate:up|down|check`), empty `migrations/` dir, unit tests, CI `db-baseline` job (ephemeral postgres, creates `pgmigrations` tracking table). **Migration 001 AUTHORIZED by Project Owner 2026-08-05 for future Milestone 2 implementation only — not created in this task; no schema.** Requires Step 9. | DB Engineer |
+| WP-013 | Migration 001 baseline | IV | Migration baseline implemented 2026-08-05 (branch `feature/wp-013-migration-baseline`): migrations 001–004 per `05` §4.2 — extensions + `fn_research` schema + research roles (AR-013), users + profiles (digest-unique `phone_e164` HMAC, checks, indexes), pregnancies + babies (domain checks, cascade/SET NULL), consents (append-only AR-012: `BEFORE UPDATE OR DELETE` trigger + erasure-gated right-to-erasure cascade FR-007/FR-128; one-active-grant state guard incl. re-consent FR-125 — see `004` header), user_preferences. Integration tests 9/9 (up → asserts → down → re-up) green against ephemeral postgres; CI `db-baseline` now runs `migrate:up` + `test:migrations` + `migrate:check`. Auth storage tables deferred per `05` §4.3. | DB Engineer |
 | WP-014 | Observability + DR skeleton | S | Requires Step 11; not in M1 scope. | DevOps |
 
 ### Phase 2 — Backend Core
 
 | WP | Work Package | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
-| WP-015 | API platform foundation | IV | WP-015 implementation 2026-08-05 (backend, branch `feature/wp-015-api-platform-foundation` → develop): gateway `/v1` platform middleware — CORS allow-list (06 §12.1), Bearer pass-through (token validation deferred to WP-016), Redis token-bucket rate limiting (FR-169; in-memory fallback for dev/CI), per-request idempotency via `Idempotency-Key` (FR-161 / 06 §2.3; 24h TTL), smoke routes `/v1/ping` + `/v1/platform/echo`; config `FN_*` additions (redis, store driver, limits, TTL); OpenAPI `/v1/` contract + `common.yaml` + per-service skeletons (AR-003); compose + `.env.example`; CI `redis` service for integration tests. Gateway tests 40/40 green incl. Redis integration (REDIS_TEST_URL). PR awaiting CI verification + merge authorization. | Backend |
+| WP-015 | API platform foundation | C | Merged to `develop` 2026-08-05 (PR #6, squash commit `ab2ada6`): gateway `/v1` platform middleware — CORS allow-list (06 §12.1), Bearer pass-through (token validation deferred to WP-016), Redis token-bucket rate limiting (FR-169; in-memory fallback for dev/CI), per-request idempotency via `Idempotency-Key` (FR-161 / 06 §2.3; 24h TTL), smoke routes `/v1/ping` + `/v1/platform/echo`; config `FN_*` additions (redis, store driver, limits, TTL); OpenAPI `/v1/` contract + `common.yaml` + per-service skeletons (AR-003); compose + `.env.example`; CI `redis` service for integration tests. Gateway tests 40/40 green incl. Redis integration (REDIS_TEST_URL); Quality + db-baseline CI green on merge. | Backend |
 | WP-016 | Auth service (initial) | S | | Backend |
 | WP-017 | User & profile service | S | | Backend |
 | WP-018 | Consent lifecycle service | S | | Backend |
