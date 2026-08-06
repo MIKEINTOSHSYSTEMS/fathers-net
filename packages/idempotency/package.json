@@ -1,0 +1,24 @@
+{
+  "name": "@fathersnet/idempotency",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Consumer dedup + scheduler run-id idempotency primitives (FR-161, FR-163; 06 §2.3)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "ioredis": "5.4.1"
+  }
+}

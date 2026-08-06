@@ -19,7 +19,7 @@
 | Phase 2 authorization | **FULL AUTHORIZATION GRANTED** | Granted 2026-08-05 by **Project Owner** — Milestone 2 business implementation (WP-015…WP-024) authorized to begin with approved work packages. Governance-recorded only in this task; implementation **not started** (see §9) |
 | Gate G2 | **Not Started** | Requires Phase 3 (WP-025…WP-032) evidence |
 | Gate G3 | **Not Started** | Requires Phase 9–10 evidence (WP-095…WP-120) |
-| Decisions M-01…M-07 | **1/7 closed — M-01 Approved/Closed (GCP); M-02…M-07 Open** | M-01 approved 2026-08-05 (Project Owner): initial production cloud provider **Google Cloud Platform (GCP)**, cloud-agnostic architecture; `decision-log.md` §1/§1.1 |
+| Decisions M-01…M-07, M-08 | **M-01 + M-08 Approved/Closed; M-02…M-07 Open** | M-01 approved 2026-08-05 (Project Owner): initial production cloud provider **Google Cloud Platform (GCP)**, cloud-agnostic architecture; `decision-log.md` §1/§1.1. M-08 approved 2026-08-05 (Project Owner): Phase 2 open-decision handling + provider-agnostic test-doubles — **governance only**, no production provider selected; `decision-log.md` §1.2/§1.3 |
 | Risks open | 64 planned (PM-01…PM-64) | `16` §3; critical rows: PM-21, PM-26 |
 | Work packages | 0/120 closed | Registry in §7 |
 
@@ -53,7 +53,7 @@
 | `21-quality-gate-checklist.md` | Authored (G1/G2/G3) | QA Lead |
 | `22-feature-implementation-matrix.md` | Authored (traceability) | QA Lead |
 | `23-healthcare-compliance-and-safety-plan.md` | Authored (safety) | Healthcare & Content |
-| `decision-log.md` | Authored; M-01…M-07 **Open** | Program |
+| `decision-log.md` | Authored; M-01 + M-08 **Approved/Closed**; M-02…M-07 **Open** | Program |
 | `missing-requirements-analysis.md` | Authored | QA Lead |
 
 ---
@@ -62,7 +62,7 @@
 
 | Gate | Definition (`14` §1) | State | Open Items | Evidence Due |
 | --- | --- | --- | --- | --- |
-| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Accepted/Granted** | 15 items (`21` §3) — acceptance record 2026-08-05; G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner** 2026-08-05; M-01 closed 2026-08-05 (M-02…M-07 open); full Phase 2 authorization granted 2026-08-05 | WP-001…WP-014 |
+| **G1** Planning & Architecture | End of Phase 1; package from Phase 0 | **Accepted/Granted** | 15 items (`21` §3) — acceptance record 2026-08-05; G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner** 2026-08-05; M-01 + M-08 closed 2026-08-05 (M-02…M-07 open); full Phase 2 authorization granted 2026-08-05 | WP-001…WP-014 |
 | **G2** Core Platform & Security | End of Phase 3 | **Not Started** | 13 items (`21` §4) | WP-025…WP-032 + Phase 2 |
 | **G3** Release & Pilot Launch | Phase 10 go/no-go | **Not Started** | 17 items (`21` §5) | WP-095…WP-120 |
 
@@ -72,9 +72,9 @@
 
 | Milestone | Checkpoint (`14` §15) | State | Gate |
 | --- | --- | --- | --- |
-| M0 | Phase 0 baseline & decisions approved | **In Progress** — M-01 closed 2026-08-05 (GCP, Project Owner); M-02…M-07 open | G1 package |
+| M0 | Phase 0 baseline & decisions approved | **In Progress** — M-01 + M-08 closed 2026-08-05 (Project Owner); M-02…M-07 open | G1 package |
 | M1 | Phase 1 foundation live | **Accepted/Granted** — Gate G1 accepted 2026-08-05. Committed + pushed `b616224` + `95e4665` + `26acb6e` + `9e4c454` (foundation `b616224`, doc sync `95e4665`, CI dependency remediation `26acb6e`, CI evidence doc sync `9e4c454`); GitHub Actions quality job green (runs 30963968046/30964438595); branch protection active (ruleset 20422621: PR + 1 approval + Quality CI + linear history). Phase 2 / Milestone 2 NOT authorized | Gate 1 |
-| M2 | Phase 2 backend core functional | **In Progress** — full Phase 2 authorization granted 2026-08-05 (Project Owner); **WP-015 closed** 2026-08-05 (PR #6 → develop `ab2ada6`); migration baseline 001–004 in verification (`WP-013`); WP-016…WP-024 not started | Internal |
+| M2 | Phase 2 backend core functional | **In Progress** — full Phase 2 authorization granted 2026-08-05 (Project Owner); **WP-015 closed** 2026-08-05 (PR #6 → develop `ab2ada6`); migration baseline 001–004 in verification (`WP-013`); **WP-024a in progress** 2026-08-06 (event bus/outbox/idempotency packages, packages-only scope — see WP-024 row); WP-016…WP-023 not started | Internal |
 | M3 | Phase 3 security complete | **Not Started** | Gate 2 |
 | M4 | Phase 5 channels integrated | **Not Started** | Internal |
 | M5 | Phase 7 app + admin feature complete | **Not Started** | Internal |
@@ -85,7 +85,7 @@
 
 ---
 
-## 5. Decision Status (M-01…M-07)
+## 5. Decision Status (M-01…M-08)
 
 | Decision | Recommended Default (`decision-log.md` §1) | Approver | Status |
 | --- | --- | --- | --- |
@@ -96,6 +96,7 @@
 | M-05 Pilot cohort | **500+ default** | Program + Research | **Open** |
 | M-06 Object storage + host | Cloud object storage, SSE | DevOps + Security | **Open** |
 | M-07 Budget cap | Reference in `20` | Program | **Open** |
+| M-08 Phase 2 open-decision handling | Provider-agnostic adapters + test-doubles; no provider-coupled code in Phase 2; M-07 default adopted for WP-023; M-02 OTP via adapter + test-double (provider deferred to Phase 4) | Project Owner | **Approved/Closed** (2026-08-05 — governance only) |
 
 ---
 
@@ -127,7 +128,7 @@ Full register: `16-risk-management-plan.md` §3.
 | WP | Work Package | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | WP-001 | Freeze SRS + traceability framework | S | | QA Lead |
-| WP-002 | Decision log; close M-01…M-07 | IP | M-01 closed 2026-08-05 (GCP, Project Owner — `decision-log.md` §1.1); M-02…M-07 open. | Program |
+| WP-002 | Decision log; close M-01…M-07 | IP | M-01 closed 2026-08-05 (GCP, Project Owner — `decision-log.md` §1.1); M-08 closed 2026-08-05 (Phase 2 open-decision handling + provider-agnostic test-doubles, governance only — `decision-log.md` §1.2/§1.3); M-02…M-07 open. | Program |
 | WP-003 | Architecture review/sign-off | S | | Technical Lead |
 | WP-004 | Tech-stack sign-off | S | | Architect |
 | WP-005 | STRIDE + DPIA + processing register | IP | Draft STRIDE + DPIA produced 2026-08-05 (foundation prep): `verification/audits/threat-model/stride-threat-model-draft.md`, `verification/audits/dpa/dpia-draft.md`. **Approved by Project Owner 2026-08-05 (G1-05/G1-06)** — draft evidence preserved; no independent security/privacy reviewer sign-off claimed. | Security |
@@ -159,7 +160,7 @@ Full register: `16-risk-management-plan.md` §3.
 | WP-021 | Reminder engine | S | | Backend |
 | WP-022 | Journal service | S | | Backend |
 | WP-023 | Checklist & budget service | S | | Backend |
-| WP-024 | Event bus + outbox + scheduler | S | | Backend |
+| WP-024 | Event bus + outbox + scheduler | IP | **WP-024a (packages-only, no committed migrations)** 2026-08-06: `packages/events` + `packages/idempotency` — canonical event vocabulary (36 events, `06` §2.2 names + `03` §4.6 aliases, FR-160), provider-agnostic `EventBus` (Redis Streams adapter + in-memory test-double, M-08/D-02), stream consumer (consumer groups, at-least-once, per-topic DLQ `12` §16 I-13), outbox relay (test-local DDL contract `OUTBOX_TABLE_DDL` — production schema deferred to separate DB approval; retries exp backoff + jitter; `onDead` OR-008), consumer dedup + scheduler run-id stores (FR-161/FR-163). Tests 51/51 green (unit + Redis/PG integration via `REDIS_TEST_URL`/`DATABASE_URL`, test-local outbox table); lint/typecheck/build clean; line coverage ≥ 92%. Remaining (WP-024b/c): scheduler jobs, service adoption, outbox migration per approved schema. | Backend |
 
 ### Phase 3 — Authentication & Security (→ Gate G2)
 
@@ -326,6 +327,8 @@ Full register: `16-risk-management-plan.md` §3.
 | 2026-08-05 | **Milestone 2 Implementation Plan Approved (Project Owner)** | Milestone 2 Implementation Plan **APPROVED 2026-08-05** — header finalized to Approved; Phase 2 project plan (`milestone-2-implementation-plan.md`) sanctioned for execution. `develop` branch created + pushed from `main` (`7cb9a06`) per plan §9 before any WP-015 work. |
 | 2026-08-05 | **WP-015 Implementation (API platform foundation)** | WP-015 implemented 2026-08-05: `/v1` platform middleware in gateway (CORS allow-list, Bearer pass-through, Redis token-bucket rate limiting with memory fallback, `Idempotency-Key` idempotency with 24h TTL), smoke routes `/v1/ping` + `/v1/platform/echo`, config registry additions (`FN_REDIS_URL`, `FN_STORE_DRIVER`, `FN_RATE_LIMIT_*`, `FN_IDEMPOTENCY_TTL_SECONDS`), OpenAPI contract additions (`common.yaml`, `gateway.yaml` `/v1/`, 6 per-service skeletons), compose + `.env.example` updates, CI `redis` service in quality job. Dependencies added: `@fastify/cors@10.0.0`, `ioredis@5.4.1` (gateway) — dependency change recorded per AGD-002 security-sensitive list; Project Owner sign-off covered by the WP-015 implementation authorization. Gateway tests 40/40 green (incl. Redis integration against live Redis). Branch `feature/wp-015-api-platform-foundation` → PR to `develop`; WP-016…WP-024 remain Not Started. |
 | 2026-08-05 | **WP-013 Migration Baseline Implementation (migrations 001–004)** | Database Migration Baseline implemented 2026-08-05 (branch `feature/wp-013-migration-baseline`, commit `9c8a6c4`): migrations 001–004 per `05` §4.2 — extensions + `fn_research`/research roles (AR-013), `users`+`profiles` (encrypted `phone_e164` + HMAC digest unique index, 05 §8.1), `pregnancies`+`babies` (domain checks, CASCADE/SET NULL), `consents`+`user_preferences`. **Design resolution (pre-first-application, recorded for AGD-002 sign-off):** `05` §8.5.2's "partial unique index on `granted`" is logically incompatible with append-only re-consent (FR-125) — replaced by a `BEFORE INSERT` state guard (grant → withdraw → re-grant, one active grant per type); the append-only `BEFORE UPDATE OR DELETE` trigger permits only the right-to-erasure cascade path via `SET LOCAL app.consent_erasure = on` (SRS §13.4, FR-007/FR-128), matching SRS §13.3.4 (no partial index in SRS; CASCADE explicit). Auth storage tables deferred per `05` §4.3. Validation: `migrate:up`/`migrate:check` green; migration integration tests 9/9 (up → schema/constraint/immutability asserts → down → re-up); package lint/SAST/typecheck/build/coverage green; CI `db-baseline` extended with `test:migrations`. |
+| 2026-08-05 | **M-08 Decision Approval (Project Owner)** | **M-08** "Phase 2 open-decision handling + provider-agnostic test-doubles" **APPROVED/CLOSED 2026-08-05** (Project Owner; M-08 Decision Review Report + M-08 Approval Authorization). Decision: Phase 2 (WP-015…WP-024) executes behind provider-agnostic adapters + test-doubles (AR-004/FR-149, M-01 cloud-agnostic precedent) — no provider-coupled code lands in Phase 2; M-07 adopted at the `20` reference default as a configurable budget cap for WP-023; M-02 OTP delivery via adapter + test-double, final provider deferred to Phase 4 (D-01); M-03/M-04/M-05/M-06 remain Open, consumed only at their documented phases; Phase 2 authorization recorded as the governing override of "all seven closed before code" **for Phase 2 only** (`21` G1-02 relaxation noted). **Governance decision only** — no production provider selected; no implementation started (no WP-024a, WP-016, schema, migrations, APIs, UI); auth-state storage remains deferred to DB architect (`05` §4.3); AGD-002 unchanged. Updated: `decision-log.md` §1.2 (status Approved/Closed) + §1.3 (closure record); this tracker. Next work (WP-024a) gated on M-08 closure + separate one-WP-at-a-time authorization (`milestone-2-implementation-plan.md` §2, §11). |
+| 2026-08-06 | **WP-024a Implementation (event bus + outbox + idempotency packages)** | WP-024a implemented 2026-08-06 (branch `feature/wp-013-migration-baseline`, working tree — **not committed/PR'd, awaiting separate authorization**). **Scope per authorization:** packages-only; no committed DB migration, no schema changes, no migration-numbering updates (`05` §4.2/decision-log untouched); outbox verified against a **test-local table** only — production outbox schema requires a separate DB architecture approval + migration authorization. Created **`packages/events`** (FR-160/FR-161/AR-007): canonical event vocabulary (`EVENT_REGISTRY`, 36 events — `06` §2.2 names + `03` §4.6 aliases/idempotency keys, `availability` phase2/reserved), provider-agnostic `EventBus` (M-08, D-02) with Redis Streams adapter (one stream per event type: `events:<name>`) + hermetic in-memory test-double; stream consumer (consumer groups, at-least-once delivery, ack-based, per-topic DLQ `<stream>.dlq` per `12` §16 I-13 with OR-008 `dlqLen`/`pendingCount` surfaces); outbox relay (publish-on-commit, exactly-once per row, exponential backoff + jitter per `03` §5.4 with `backoffMs` export, `onDead` hook + `status='dead'` DLQ, `OUTBOX_TABLE_DDL` canonical per-service contract, `PostgresOutboxReader` with SQL-injection-safe table validation); event envelope factory with `EventValidationError` and No-PII rule (FR-022) documented. Created **`packages/idempotency`** (FR-161/FR-163): consumer dedup store (`claim`/`isProcessed`, memory + Redis `SET NX PX` under `consumer-dedup:<name>:<id>`, per-consumer isolation) + scheduler job-run store (`claimRun` — run-id binding prevents duplicate scheduler runs across relay restarts). Tests **51/51 green** (events 39, idempotency 12) incl. Redis integration (`REDIS_TEST_URL`) and Postgres+Redis outbox integration against a test-local `outbox` table (`DATABASE_URL`); suites run serially (`maxWorkers: 1`, shared infra); line coverage events 92.34% / idempotency 95.23% (QR-002 global ≥70%); lint + SAST clean (0 errors/0 warnings), typecheck + build green (logger/idempotency/events). Deps added: `ioredis@5.4.1`, `pg@8.13.1`, `@types/pg@8.11.10` + workspace edges (`events`→`logger`, `events`→`idempotency` dev) — recorded per AGD-002 security-sensitive list. **Remaining for WP-024b/c:** background scheduler jobs (prompt/pulse/reminder), service adoption of outbox relay + consumer dedup, and the production outbox migration (blocked on separate DB schema approval). |
 
 ### Milestone 1 Verification Evidence (2026-08-05 gate)
 
@@ -353,4 +356,4 @@ Environment: local Windows dev (git 2.51.2, Node v20.20.2, npm 10.8.2, Docker 28
 
 ---
 
-**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-07 + AGD-001/AGD-002, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **FULL PHASE 2 AUTHORIZATION GRANTED 2026-08-05 (Project Owner)** — M-01 approved (initial production cloud provider **GCP**, cloud-agnostic), G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner**, **Migration 001 authorized for future Milestone 2 implementation only**, WP-015…WP-024 business implementation authorized to begin with approved work packages (**not started** — governance record only). **AGD-002 solo-maintainer merge policy Approved/Closed 2026-08-05 (Project Owner)** — ruleset `20422621` sole-maintainer bypass verified; see `decision-log.md` §7. M-02…M-07 remain Open; local `main` ref realignment pending (`origin/main` = `b36dd58`).
+**END OF DOCUMENT — Implementation Status (FathersNet / Ayay).** Live tracker for WP-001…WP-120, gates G1/G2/G3, milestones M0–M9, decisions M-01…M-08 + AGD-001/AGD-002, and risks PM-01…PM-64. Next update: Gate G1 accepted 2026-08-05; **FULL PHASE 2 AUTHORIZATION GRANTED 2026-08-05 (Project Owner)** — M-01 approved (initial production cloud provider **GCP**, cloud-agnostic), G1-05 STRIDE + G1-06 DPIA **Approved by Project Owner**, **Migration 001 authorized for future Milestone 2 implementation only**, WP-015…WP-024 business implementation authorized to begin with approved work packages (**not started** — governance record only). **AGD-002 solo-maintainer merge policy Approved/Closed 2026-08-05 (Project Owner)** — ruleset `20422621` sole-maintainer bypass verified; see `decision-log.md` §7. M-02…M-07 remain Open; local `main` ref realignment pending (`origin/main` = `b36dd58`).
