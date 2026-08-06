@@ -88,8 +88,22 @@ These are **Recommended** decisions authored in the plan set. They are approved 
 | D-06 | Qdrant vector store (pending M-01 host) | `04` §7, `05` §11 | SRS-aligned; pgvector alternative noted | Medium | Reindexing and eval re-run |
 | D-07 | GitHub Actions CI/CD + OTel/Grafana observability | `04` §15/§16, `12` | Managed, SRS §16-aligned | High | Pipeline/tooling rework |
 | D-08 | `node-pg-migrate` migration tooling | `05` §4.1 | Versioned/reversible/audited (FR-164) | Medium | Migration-file syntax and CI change |
+| D-09 | Auth-state storage (WP-016) — Redis-only | `05` §4.3, `06` Phase B | **Approved/Closed (2026-08-06)** — Option A: Redis-only auth state via provider-agnostic adapter + test-double (M-08); hashed OTP/token values only; no auth tables; Phase 3 re-evaluation for durable rotation (Option B / migration `018` remains the documented upgrade path) | High | Schema extension (migration 018 + auth tables); wider WP-016 scope |
 
 **Source:** `03` §10.2; `04` §3–§16; `05` §4. **Classification:** Recommended. **Confidence:** as listed. **Reasoning:** These resolve the "how" beneath the confirmed "what" (ADRs) and the configurable "which" (M-decisions); recording them keeps the adoption explicit. **Impact if changed:** reversal is recorded in Section 5 with a decision-log entry and re-verified against the affected AR/NFR acceptance criteria.
+
+### 3.1 D-09 Closure Record (2026-08-06 — Project Owner)
+
+| D-09 | Auth-state storage (WP-016) — Redis-only |
+| --- | --- |
+| **Status** | **Approved/Closed (2026-08-06)** |
+| **Decision** | **Option A — Redis-only auth-state storage for WP-016**, exercised through a **provider-agnostic adapter with test-double support** (M-08). Applies only to OTP verification state and the initial refresh-token state handling required by WP-016. Only **hashed** OTP/token values are stored (`code_hash`/`token_hash`); no plaintext OTP/token storage anywhere. Redis retention discipline documented; revocation-state retention aligned with token lifetime (revoked-refresh set retention ≥ refresh-token lifetime, default 30 d). **Full refresh-token rotation + reuse-detection enhancements remain Phase 3 (WP-025) responsibility**; if durable rotation history/audit is then required, Option B (Redis + Postgres record, `05` §4.2 migration append `018`) remains the documented upgrade path — no renumbering (003–017). |
+| **Approver** | Project Owner |
+| **Evidence** | `05` §4.3; `06` Phase B; `11` §3.2 (JWT strategy); `03` §3.1 (AR-008 externalized state: OTP/session state in Redis); M-08 (provider-agnostic adapters + test-doubles); Auth State Storage Decision Review 2026-08-06 |
+| **Affected risks closed/reduced** | PM-14 (mitigated — hashed storage + documented retention discipline); PM-49 reduced (decision unblocks WP-016) |
+| **Dependent phase unlocked** | WP-016 (Auth service, initial) |
+| **Co-approvers** | DB architect, Technical Lead |
+| **Notes** | `staff_users`/`staff_mfa` remain deferred and may be decided separately (Phase L, M-08 note). **No migration created; migration baseline unchanged** (no `018`). M-08 unchanged; M-02 (OTP delivery provider) remains deferred to Phase 4. |
 
 ---
 
@@ -149,4 +163,4 @@ Closed governance decisions adopted via the **Repository Governance Resolution**
 
 ---
 
-**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07: **M-01 Approved/Closed 2026-08-05 (Project Owner — initial production cloud provider GCP, cloud-agnostic architecture)**; M-02…M-07 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked; assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. **AGD-001 (repository governance) and AGD-002 (solo-maintainer merge policy) Approved/Closed 2026-08-05.** Created as WP-002 of `17-final-execution-roadmap.md`.
+**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07: **M-01 Approved/Closed 2026-08-05 (Project Owner — initial production cloud provider GCP, cloud-agnostic architecture)**; M-02…M-07 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked (**D-09 — auth-state storage (Option A, Redis-only, WP-016) Approved/Closed 2026-08-06 — Project Owner**); assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. **AGD-001 (repository governance) and AGD-002 (solo-maintainer merge policy) Approved/Closed 2026-08-05.** Created as WP-002 of `17-final-execution-roadmap.md`.
