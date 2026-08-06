@@ -1,8 +1,8 @@
 {
-  "name": "@fathersnet/gateway",
+  "name": "@fathersnet/auth",
   "version": "0.1.0",
   "private": true,
-  "description": "FathersNet gateway — Fastify HTTP entry point (Milestone 1: health endpoints only)",
+  "description": "FathersNet auth service — OTP request/verify with lockout, short-lived JWT access + revocable refresh tokens (WP-016)",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,9 +21,9 @@
     "sast": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
-    "@fastify/cors": "10.0.0",
     "@fathersnet/config": "*",
     "@fathersnet/errors": "*",
+    "@fathersnet/events": "*",
     "@fathersnet/logger": "*",
     "fastify": "5.11.2",
     "ioredis": "5.4.1",

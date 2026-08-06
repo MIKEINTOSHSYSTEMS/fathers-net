@@ -10,6 +10,7 @@ import { createReadinessRegistry } from './services/readiness';
 import { createRedisClient } from './services/redis';
 import { createRateLimitStore, type RateLimitStore } from './services/ratelimit';
 import { createIdempotencyStore, type IdempotencyStore } from './services/idempotency';
+import { createTokenVerifier, type TokenVerifier } from './services/tokens';
 
 export interface AppContext {
   config: GatewayConfig;
@@ -58,6 +59,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await healthRoutes(app, { config, readiness, startedAt });
 
+  // Stateless access-token validation (WP-016). Enabled only when the shared
+  // auth secret is configured; otherwise Bearer tokens pass through untouched
+  // (pre-WP-016 dev mode). Failing closed: no secret => no authenticated id.
+  const tokenVerifier: TokenVerifier | null = config.FN_AUTH_JWT_SECRET
+    ? createTokenVerifier(config.FN_AUTH_JWT_SECRET, config.FN_AUTH_ISSUER, config.FN_AUTH_AUDIENCE)
+    : null;
+
   let redisClient: Redis | null = null;
   const stores: PlatformStores =
     options.stores ??
@@ -87,6 +95,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         config,
         rateLimitStore: stores.rateLimit,
         idempotencyStore: stores.idempotency,
+        tokenVerifier,
         startedAt,
       });
     },
