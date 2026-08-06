@@ -1,5 +1,8 @@
 import { Pool, type PoolClient, type QueryResult } from 'pg';
+import { ConflictError } from '@fathersnet/errors';
 import type {
+  ConsentRecord,
+  CreateConsentInput,
   CreateUserInput,
   PreferencesRecord,
   PreferencesUpsertInput,
@@ -11,12 +14,17 @@ import type {
   UsersStore,
 } from './types';
 
+/** pg error raised by `RAISE EXCEPTION` in the `004` consent triggers (AR-012). */
+const PG_RAISE_EXCEPTION = 'P0001';
+
 /**
- * Postgres users store (WP-017). Reads/writes the baseline schema ONLY
- * (migrations 002–004) — no DDL, no new tables, no schema changes (WP-017 DB
- * boundary). All queries are parameterized; the phone is stored as the
+ * Postgres users store (WP-017/WP-018). Reads/writes the baseline schema ONLY
+ * (migrations 002–004) — no DDL, no new tables, no schema changes (WP-017/018
+ * DB boundary). All queries are parameterized; the phone is stored as the
  * ciphertext the service passes in (never plaintext, FR-009/FR-123). JSONB
- * preference columns are serialized/parsed here.
+ * preference columns are serialized/parsed here. `consents` is append-only:
+ * inserts go through the `004` trigger's state guard, which enforces the
+ * single-active-grant rule under concurrency (AR-012).
  */
 export function createPostgresUsersStore(connectionString: string): UsersStore {
   const pool = new Pool({
@@ -79,6 +87,18 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
         row.content_categories && typeof row.content_categories === 'object'
           ? (row.content_categories as string[])
           : null,
+    };
+  }
+
+  function parseConsent(row: Record<string, unknown>): ConsentRecord {
+    return {
+      id: String(row.id),
+      userId: String(row.user_id),
+      consentType: row.consent_type as ConsentRecord['consentType'],
+      version: String(row.version),
+      state: row.state as ConsentRecord['state'],
+      grantedAt: (row.granted_at as Date).toISOString(),
+      withdrawnAt: row.withdrawn_at ? (row.withdrawn_at as Date).toISOString() : null,
     };
   }
 
@@ -288,8 +308,66 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
       return parsePreferences(result.rows[0]);
     },
 
+    async getConsents(userId: string): Promise<ConsentRecord[]> {
+      const result = await pool.query(
+        `SELECT id, user_id, consent_type, version, state, granted_at, withdrawn_at
+         FROM consents
+         WHERE user_id = $1
+         ORDER BY granted_at ASC, id ASC`,
+        [userId],
+      );
+      return result.rows.map((row) => parseConsent(row));
+    },
+
+    async findConsentById(userId: string, id: string): Promise<ConsentRecord | null> {
+      const result = await pool.query(
+        `SELECT id, user_id, consent_type, version, state, granted_at, withdrawn_at
+         FROM consents
+         WHERE user_id = $1 AND id = $2
+         LIMIT 1`,
+        [userId, id],
+      );
+      return result.rows.length > 0 ? parseConsent(result.rows[0]) : null;
+    },
+
+    async insertConsent(input: CreateConsentInput): Promise<ConsentRecord> {
+      try {
+        const result = await pool.query(
+          `INSERT INTO consents (user_id, consent_type, version, state, granted_at, withdrawn_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, user_id, consent_type, version, state, granted_at, withdrawn_at`,
+          [
+            input.userId,
+            input.consentType,
+            input.version,
+            input.state,
+            input.grantedAt,
+            input.withdrawnAt,
+          ],
+        );
+        return parseConsent(result.rows[0]);
+      } catch (err) {
+        // The `004` state guard is the authoritative concurrency control: a
+        // trigger rejection under a race maps to the same domain conflict the
+        // service pre-checks (AR-012 single active grant).
+        if (isPgRaise(err)) {
+          throw new ConflictError('Consent state transition rejected');
+        }
+        throw err;
+      }
+    },
+
     async dispose(): Promise<void> {
       await pool.end();
     },
   };
+}
+
+function isPgRaise(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === PG_RAISE_EXCEPTION
+  );
 }

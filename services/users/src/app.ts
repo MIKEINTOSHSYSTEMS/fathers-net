@@ -9,6 +9,7 @@ import { requireBearerPlugin } from './middleware/auth';
 import { usersMeRoutes, usersRegisterRoute, type UsersRouteDeps } from './routes';
 import { createUsersStore, type UsersStore } from './services/store';
 import { UsersService } from './services/users-service';
+import { ConsentsService } from './services/consents-service';
 import { createTokenVerifier, type TokenVerifier } from './services/tokens';
 import { createPregnancyEngineStub, type PregnancyEngine } from './services/pregnancy';
 import { createAesGcmPhoneEncryptor, type PhoneEncryptor } from './providers/phone-encryption';
@@ -98,7 +99,8 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
     pregnancyEngine,
     nowMs,
   });
-  const deps: UsersRouteDeps = { usersService, eventBus, logger };
+  const consentsService = new ConsentsService({ store, eventBus, logger, nowMs });
+  const deps: UsersRouteDeps = { usersService, consentsService, eventBus, logger };
 
   app.addHook('onClose', async () => {
     await store.dispose();

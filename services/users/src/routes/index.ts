@@ -2,9 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import type { UsersService } from '../services/users-service';
+import type { ConsentType } from '../services/store/types';
+import type { ConsentsService } from '../services/consents-service';
 
 export interface UsersRouteDeps {
   usersService: UsersService;
+  consentsService: ConsentsService;
   eventBus: EventBus;
   logger: Logger;
 }
@@ -88,12 +91,41 @@ const PreferencesBody = {
   },
 } as const;
 
+const ConsentBody = {
+  type: 'object',
+  required: ['consent_type', 'version'],
+  additionalProperties: false,
+  properties: {
+    consent_type: {
+      type: 'string',
+      enum: ['participation', 'research', 'media', 'whatsapp_opt_in'],
+    },
+    version: { type: 'string', minLength: 1, maxLength: 100 },
+  },
+} as const;
+
+const ConsentIdParams = {
+  type: 'object',
+  required: ['id'],
+  properties: {
+    id: {
+      type: 'string',
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    },
+  },
+} as const;
+
 /**
- * SRS §12.3 users routes (WP-017). The `/register` endpoint is public; every
- * `/me` handler is self-scoped — the authenticated subject from the bearer
- * token is the only user id ever used, so a caller can never read or mutate
- * another user (11 §3.2, SRS §12.3). Responses mask the phone (QR-009); no
- * PII is logged or emitted (FR-022).
+ * SRS §12.3 users routes (WP-017/WP-018). The `/register` endpoint is public;
+ * every `/me` handler is self-scoped — the authenticated subject from the
+ * bearer token is the only user id ever used, so a caller can never read or
+ * mutate another user (11 §3.2, SRS §12.3). Responses mask the phone (QR-009);
+ * no PII is logged or emitted (FR-022). The consent handlers enforce the
+ * append-only lifecycle (AR-012): grant/re-consent, withdrawal, and the
+ * immutable history view (FR-003/FR-004/FR-125/FR-117). Note: like the other
+ * `/me` endpoints, responses use camelCase field names while the OpenAPI
+ * contract documents snake_case — a pre-existing WP-017 naming drift, kept
+ * consistent here and awaiting a global contract-alignment pass.
  */
 export async function usersRegisterRoute(
   app: FastifyInstance,
@@ -176,4 +208,34 @@ export async function usersMeRoutes(app: FastifyInstance, deps: UsersRouteDeps):
       contentCategories: body.content_categories,
     });
   });
+
+  app.get('/me/consents', async (request) => {
+    const user = request.user as { subjectId: string };
+    return deps.consentsService.getConsents(user.subjectId);
+  });
+
+  app.post('/me/consents', { schema: { body: ConsentBody } }, async (request, reply) => {
+    const user = request.user as { subjectId: string };
+    const body = request.body as { consent_type: string; version: string };
+    const result = await deps.consentsService.grantConsent(user.subjectId, {
+      consentType: body.consent_type as ConsentType,
+      version: body.version,
+      requestId: request.id,
+    });
+    reply.status(201);
+    return result;
+  });
+
+  app.post(
+    '/me/consents/:id/withdraw',
+    { schema: { params: ConsentIdParams } },
+    async (request) => {
+      const user = request.user as { subjectId: string };
+      const params = request.params as { id: string };
+      return deps.consentsService.withdrawConsent(user.subjectId, {
+        consentId: params.id,
+        requestId: request.id,
+      });
+    },
+  );
 }
