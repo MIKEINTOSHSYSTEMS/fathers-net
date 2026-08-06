@@ -1,0 +1,37 @@
+{
+  "name": "@fathersnet/content",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FathersNet content/CMS service — content library, review/approval workflow, versioning, EN/AM parity, medical-review segregation of duties, published-only retrieval (WP-020)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@fathersnet/config": "*",
+    "@fathersnet/errors": "*",
+    "@fathersnet/events": "*",
+    "@fathersnet/logger": "*",
+    "fastify": "5.11.2",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@fathersnet/test-utils": "*",
+    "@types/jsonwebtoken": "9.0.7",
+    "@types/pg": "8.11.10"
+  }
+}

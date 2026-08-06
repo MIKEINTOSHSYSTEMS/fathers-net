@@ -9,8 +9,8 @@
   ],
   "scripts": {
     "build": "redocly bundle openapi/gateway.yaml --output dist/openapi/gateway.yaml",
-    "contract:lint": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml --config ../../redocly.yaml",
-    "lint": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml --config ../../redocly.yaml",
-    "sast": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml --config ../../redocly.yaml"
+    "contract:lint": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml openapi/content.yaml --config ../../redocly.yaml",
+    "lint": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml openapi/content.yaml --config ../../redocly.yaml",
+    "sast": "redocly lint openapi/gateway.yaml openapi/auth.yaml openapi/users.yaml openapi/content.yaml --config ../../redocly.yaml"
   }
 }

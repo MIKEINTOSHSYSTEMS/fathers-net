@@ -20,6 +20,7 @@ const MIGRATION_NAMES = [
   '002-users-and-profiles',
   '003-pregnancies-and-babies',
   '004-consents-and-preferences',
+  '011-content',
 ];
 
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -42,7 +43,7 @@ describeMigrate('database migration baseline (001-004)', () => {
     await runMigrations({ databaseUrl: DATABASE_URL as string });
   });
 
-  it('records exactly the four baseline migrations in pgmigrations', async () => {
+  it('records exactly the baseline migrations in pgmigrations', async () => {
     const result = await checkMigrations(DATABASE_URL as string);
     expect(result.tableExists).toBe(true);
     expect(result.applied).toEqual(MIGRATION_NAMES);
@@ -320,6 +321,137 @@ describeMigrate('database migration baseline (001-004)', () => {
     });
   });
 
+  it('creates content and content_versions with lifecycle checks and search index', async () => {
+    await withClient(async (client) => {
+      const contentColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'content' ORDER BY ordinal_position`,
+      );
+      expect(contentColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'content_type',
+        'title_en',
+        'title_am',
+        'body_en',
+        'body_am',
+        'pregnancy_week',
+        'status',
+        'medical_reviewed',
+        'created_by',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const contentChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'content'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      const checkNames = contentChecks.map((r) => r.conname);
+      expect(checkNames.some((n) => n.includes('content_type'))).toBe(true);
+      expect(checkNames.some((n) => n.includes('pregnancy_week'))).toBe(true);
+      expect(checkNames.some((n) => n.includes('status'))).toBe(true);
+
+      const contentIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'content' ORDER BY indexname`,
+      );
+      const names = contentIndexes
+        .map((r) => r.indexname)
+        .filter((n) => !n.endsWith('_pkey'))
+        .sort();
+      expect(names).toEqual([
+        'idx_content_body_en_fts',
+        'idx_content_status_week',
+        'idx_content_type_status',
+      ]);
+
+      const fts = contentIndexes.find((r) => r.indexname === 'idx_content_body_en_fts');
+      expect(fts.indexdef).toMatch(/USING gin/i);
+      expect(fts.indexdef).toContain('to_tsvector');
+
+      const versionColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'content_versions' ORDER BY ordinal_position`,
+      );
+      expect(versionColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'content_id',
+        'version',
+        'change_note',
+        'body_snapshot',
+        'reviewed_by',
+        'created_at',
+      ]);
+    });
+  });
+
+  it('enforces content lifecycle checks, FTS search and cascade/SET NULL policy', async () => {
+    await withClient(async (client) => {
+      const author = await client.query(
+        `INSERT INTO users (phone_e164, phone_e164_digest, role) VALUES ('cipher-a', 'digest-a', 'staff') RETURNING id`,
+      );
+      const authorId = (author.rows[0] as { id: string }).id;
+      const reviewer = await client.query(
+        `INSERT INTO users (phone_e164, phone_e164_digest, role) VALUES ('cipher-r', 'digest-r', 'staff') RETURNING id`,
+      );
+      const reviewerId = (reviewer.rows[0] as { id: string }).id;
+
+      await expect(
+        client.query(`INSERT INTO content (content_type, status) VALUES ('blog', 'draft')`),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(`INSERT INTO content (content_type, status) VALUES ('article', 'bogus')`),
+      ).rejects.toThrow(/check/i);
+
+      const created = await client.query(
+        `INSERT INTO content (content_type, title_en, body_en, pregnancy_week, created_by)
+         VALUES ('article', 'Hospital Bag', 'Pack essentials for delivery.', 40, $1) RETURNING id`,
+        [authorId],
+      );
+      const contentId = (created.rows[0] as { id: string }).id;
+
+      await expect(
+        client.query(`INSERT INTO content (content_type, pregnancy_week) VALUES ('article', 46)`),
+      ).rejects.toThrow(/check/i);
+
+      await client.query(
+        `INSERT INTO content_versions (content_id, version, body_snapshot, reviewed_by)
+         VALUES ($1, 1, '{"title_en":"Hospital Bag"}', $2)`,
+        [contentId, reviewerId],
+      );
+
+      const search = await client.query(
+        `SELECT id FROM content
+         WHERE to_tsvector('english', coalesce(title_en, '') || ' ' || coalesce(body_en, ''))
+           @@ plainto_tsquery('english', 'hospital')`,
+      );
+      expect(search.rows).toHaveLength(1);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [reviewerId]);
+      const reviewerNull = await client.query(
+        `SELECT reviewed_by FROM content_versions WHERE content_id = $1`,
+        [contentId],
+      );
+      expect(reviewerNull.rows[0].reviewed_by).toBeNull();
+
+      await client.query(`DELETE FROM content WHERE id = $1`, [contentId]);
+      const orphanVersions = await client.query(
+        `SELECT count(*) AS n FROM content_versions WHERE content_id = $1`,
+        [contentId],
+      );
+      expect(Number(orphanVersions.rows[0].n)).toBe(0);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [authorId]);
+      const authorNull = await client.query(
+        `SELECT created_by FROM content WHERE created_by = $1`,
+        [authorId],
+      );
+      expect(authorNull.rows).toHaveLength(0);
+    });
+  });
+
   it('applies the cascade and SET NULL delete policy', async () => {
     await withClient(async (client) => {
       const owner = await client.query(
@@ -387,7 +519,7 @@ describeMigrate('database migration baseline (001-004)', () => {
       const tables = await rows(
         client,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences')`,
+         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions')`,
       );
       expect(tables).toHaveLength(0);
     });

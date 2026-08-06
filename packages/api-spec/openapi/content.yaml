@@ -3,10 +3,31 @@ info:
   title: FathersNet Content Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the guided content/coaching service contract (AR-003). Planned
-    resources (implementation-plan/06 Phase B): content catalog and lessons,
-    progress tracking. Contracts are defined here BEFORE implementation; paths
-    land with the corresponding work package.
+    Content/CMS service contract (AR-003) — SRS §12.5 Content APIs, WP-020.
+    Implements the content library (FR-076/FR-077), the draft → medical review →
+    approved → published → archive knowledge lifecycle (AR-015), versioned
+    content_versions snapshots (FR-078), EN/AM localization fields with parity
+    checks before review (FR-079), medical-review tagging (FR-081), published-only
+    retrieval (FR-078), author ≠ approver segregation of duties (FR-106), and
+    content search foundation (FR-083; PG FTS, EN-only per 05 §8.5.2).
+
+    Retrieval eligibility follows the lifecycle state (AR-015): the GET
+    endpoints expose published content only. WP-020 exposes the §12.5 surface
+    exactly — the approve action performs the approve→publish transition in one
+    step (pending_medical_review → approved → published) and emits
+    `content.published` (content_id, version, language) per language;
+    archiving emits `content.retired`. See the WP-020 implementation notes.
+
+    Every endpoint requires a Bearer access token. GET routes accept any
+    authenticated user; all write routes require the staff role (the Phase-2
+    RBAC boundary — `content_manager`/`reviewer` roles land with Phase 3
+    WP-026). The author/approver identity comes from the token `sub` claim,
+    never the body.
+
+    Media references (audio/video refs on detail) are not modeled in the
+    migration-011 schema and land with a later work package. Note: responses
+    carry camelCase field names while this contract documents snake_case — the
+    pre-existing WP-017 naming drift, kept consistent here.
   contact:
     name: FathersNet Engineering
   license:
@@ -14,15 +35,526 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3300
+    description: Local development content service (nginx terminates TLS in deployment).
 
 security:
   - bearerAuth: []
 
-paths: {}
+paths:
+  /v1/content:
+    get:
+      operationId: getContentList
+      summary: List published content
+      description: >-
+        Lists published content (FR-076/FR-077), newest first, optionally
+        filtered by language, pregnancy week, and content type (SRS §12.5,
+        FR-032). Only published items are retrievable (AR-015); drafts and
+        archived items never appear.
+      tags: [content]
+      parameters:
+        - name: language
+          in: query
+          required: false
+          description: Only return items with content in this language.
+          schema:
+            type: string
+            enum: [en, am]
+        - name: week
+          in: query
+          required: false
+          description: Only return items tagged for this pregnancy week (1–45).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 45
+        - name: type
+          in: query
+          required: false
+          description: Only return items of this content type (FR-077).
+          schema:
+            $ref: '#/components/schemas/ContentType'
+      responses:
+        '200':
+          description: Published content items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid query parameters (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+    post:
+      operationId: postContent
+      summary: Create a content draft
+      description: >-
+        Creates a draft content item (status=draft) plus its version-1
+        snapshot, owned by the staff caller (created_by = token sub, SRS §12.5).
+        EN/AM text fields are optional at draft time; parity (FR-079) is
+        enforced before the item can be submitted for review. Staff role
+        required (Phase-2 RBAC boundary).
+      tags: [content]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContentRequest'
+      responses:
+        '201':
+          description: The created draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not staff (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/content/{id}:
+    get:
+      operationId: getContent
+      summary: Get a published content item
+      description: >-
+        Returns a published content item's detail (FR-077). Non-published items
+        are 404 so the library never exposes drafts or archived work (AR-015).
+        Media references are not yet modeled (future work package).
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Content item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The published content item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Item not found or not published (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+    put:
+      operationId: putContent
+      summary: Update content (new version)
+      description: >-
+        Updates editable content (draft or pending_medical_review) and records
+        a new immutable version snapshot with an optional change note (FR-078).
+        Only draft/pending_medical_review are editable; published/archived items
+        are immutable (409). Staff role required.
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Content item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContentRequest'
+      responses:
+        '200':
+          description: The updated content item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not staff (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Item not found (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Item is not editable in its current status (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values or malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/content/{id}/submit:
+    post:
+      operationId: postContentSubmit
+      summary: Submit a draft for medical review
+      description: >-
+        Moves a draft to pending_medical_review (SRS §12.5). Requires EN/AM
+        parity (FR-079): a localized title and body must be present in both
+        languages or the submit is rejected with 422. Staff role required.
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Content item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The item is now pending_medical_review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not staff (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Item not found (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Item is not in draft status (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: EN/AM parity not met (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/content/{id}/approve:
+    post:
+      operationId: postContentApprove
+      summary: Approve and publish content
+      description: >-
+        Approves pending medical-review content and publishes it in one step:
+        pending_medical_review → approved → published (WP-020 interpretation of
+        AR-015, SRS §12.5). Sets medical_reviewed=true, records the reviewer on
+        the latest version snapshot (FR-078, SRS §11.4), and emits
+        `content.published` (content_id, version, language) once per language.
+        Segregation of duties (FR-106): the author can never approve their own
+        content (403). Staff role required.
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Content item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Approval result with the reviewed version number.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovePayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not staff, or is the author (SoD, standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Item not found (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Item is not pending_medical_review (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/content/{id}/archive:
+    post:
+      operationId: postContentArchive
+      summary: Archive content
+      description: >-
+        Archives content and removes it from retrieval (FR-080, AR-015). When
+        the item had been published, emits `content.retired` (content_id,
+        version) so the AI knowledge base deactivates its chunks (AR-016).
+        Already-archived items are rejected with 409. Staff role required.
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Content item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The archived content item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller is not staff (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Item not found (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Item is already archived (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+    ContentType:
+      type: string
+      enum: [article, video, audio, infographic, checklist, faq]
+      description: Supported content types (FR-077).
+
+    CreateContentRequest:
+      type: object
+      required:
+        - content_type
+      additionalProperties: false
+      properties:
+        content_type:
+          $ref: '#/components/schemas/ContentType'
+        title_en:
+          type: [string, 'null']
+          description: English title (optional at draft time).
+          minLength: 1
+          maxLength: 20000
+        title_am:
+          type: [string, 'null']
+          description: Amharic title (optional at draft time).
+          minLength: 1
+          maxLength: 20000
+        body_en:
+          type: [string, 'null']
+          description: English body (optional at draft time).
+          minLength: 1
+          maxLength: 20000
+        body_am:
+          type: [string, 'null']
+          description: Amharic body (optional at draft time).
+          minLength: 1
+          maxLength: 20000
+        pregnancy_week:
+          type: integer
+          description: Applicable pregnancy week (1–45), if any.
+          minimum: 1
+          maximum: 45
+
+    UpdateContentRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title_en:
+          type: [string, 'null']
+        title_am:
+          type: [string, 'null']
+        body_en:
+          type: [string, 'null']
+        body_am:
+          type: [string, 'null']
+        pregnancy_week:
+          type: integer
+          minimum: 1
+          maximum: 45
+        change_note:
+          type: string
+          description: Human-readable change note stored on the new version snapshot.
+          minLength: 1
+          maxLength: 2000
+
+    ContentPayload:
+      type: object
+      required:
+        - id
+        - content_type
+        - status
+        - medical_reviewed
+        - created_at
+        - updated_at
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        content_type:
+          $ref: '#/components/schemas/ContentType'
+        title_en:
+          type: [string, 'null']
+        title_am:
+          type: [string, 'null']
+        body_en:
+          type: [string, 'null']
+        body_am:
+          type: [string, 'null']
+        pregnancy_week:
+          type: integer
+          minimum: 1
+          maximum: 45
+        status:
+          type: string
+          description: Knowledge-content lifecycle state (AR-015).
+          enum: [draft, pending_medical_review, approved, published, archived]
+        medical_reviewed:
+          type: boolean
+          description: True once a medical reviewer approved the item (FR-081).
+        created_by:
+          type: [string, 'null']
+          format: uuid
+          description: Author (staff user id); null after staff erasure (05 §13.4).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ContentListPayload:
+      type: object
+      required:
+        - content
+      additionalProperties: false
+      properties:
+        content:
+          type: array
+          description: Published content items, newest first.
+          items:
+            $ref: '#/components/schemas/ContentPayload'
+
+    ApprovePayload:
+      type: object
+      required:
+        - content
+        - version
+      additionalProperties: false
+      properties:
+        content:
+          $ref: '#/components/schemas/ContentPayload'
+          description: The published content item.
+        version:
+          type: integer
+          description: Version number of the reviewed snapshot (approval audit).
