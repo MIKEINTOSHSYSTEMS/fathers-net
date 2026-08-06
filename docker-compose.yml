@@ -157,6 +157,44 @@ services:
       retries: 3
       start_period: 5s
 
+  users:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    environment:
+      ENV: ${ENV:-dev}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FN_PORT: '3200'
+      FN_HOST: 0.0.0.0
+      FN_SERVICE_NAME: users
+      FN_STORE_DRIVER: postgres
+      FN_DATABASE_URL: postgres://fathersnet:${DB_PASSWORD:-local-dev-only}@postgres:5432/fathersnet
+      FN_REDIS_URL: redis://redis:6379
+      FN_USERS_JWT_SECRET: ${FN_USERS_JWT_SECRET}
+      FN_USERS_ISSUER: ${FN_USERS_ISSUER:-fathersnet}
+      FN_USERS_AUDIENCE: ${FN_USERS_AUDIENCE:-fathersnet-api}
+      FN_USERS_PHONE_ENC_KEY: ${FN_USERS_PHONE_ENC_KEY}
+      FN_USERS_PHONE_DIGEST_KEY: ${FN_USERS_PHONE_DIGEST_KEY}
+    ports:
+      - '3200:3200'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3200/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   nginx:
     <<: *common
     image: nginx:1.27-alpine

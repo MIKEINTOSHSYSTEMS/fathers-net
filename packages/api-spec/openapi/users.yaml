@@ -3,10 +3,20 @@ info:
   title: FathersNet Users Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the user profile service contract (AR-003). Planned resources
-    (implementation-plan/06 Phase B): profile CRUD, family/relationship
-    management (FR-… family tree), account lifecycle. Contracts are defined
-    here BEFORE implementation; paths land with the corresponding work package.
+    User & profile service contract (AR-003). Implements the SRS §12.3 User
+    Profile APIs for WP-017: father registration (FR-001/FR-002, UC-001),
+    profile CRUD (FR-002), pregnancy start capture routed to the pregnancy
+    engine contract (stubbed until WP-019; FR-006/FR-031), cohort/referral
+    tagging (FR-010), and preferences (FR-038). Emits `user.enrolled` and
+    `user.profile.updated` on the event bus.
+
+    Identity is established by WP-016 authentication: every endpoint requires
+    a Bearer access token, and all `me` endpoints bind to the token `sub`
+    claim — no caller-supplied user id is ever accepted (self-scoped ownership,
+    SRS §12.3; 11 §3.2). Phone numbers are never returned in responses: the
+    profile payload carries a masked phone (QR-009 prep) and the stored value
+    is AES-256-GCM ciphertext with a keyed HMAC-SHA256 digest for dedup
+    (05 §8.1, FR-009/FR-123).
   contact:
     name: FathersNet Engineering
   license:
@@ -14,15 +24,491 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3200
+    description: Local development users service (nginx terminates TLS in deployment).
 
 security:
   - bearerAuth: []
 
-paths: {}
+paths:
+  /v1/users/register:
+    post:
+      operationId: postUsersRegister
+      summary: Register a father and create the durable user record
+      description: >-
+        Creates the durable user, profile, pregnancy (when EDD/LMP is
+        provided), and default preferences. Registration is the bootstrap step
+        that assigns the durable user id (FR-009); phone ownership is proven by
+        the WP-016 OTP flow, after which the auth service issues access tokens
+        bound to this durable id (self-scoped /me, 11 §3.2). Registration is
+        idempotent-safe: a phone already enrolled returns 409 rather than a
+        duplicate row (FR-008). Emits `user.enrolled` (user_id, language,
+        region, cohort) — never the phone. This endpoint is public: it runs
+        before the caller holds a token.
+      tags: [users]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Durable user record created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Phone number already enrolled (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/me:
+    get:
+      operationId: getUsersMe
+      summary: Get own profile
+      description: >-
+        Returns the caller's profile, pregnancy context, and preferences. The
+        user id is taken from the Bearer token `sub` claim; a subject with no
+        durable user record returns 404. Phone is returned masked only (QR-009
+        prep) — never plaintext.
+      tags: [users]
+      responses:
+        '200':
+          description: The caller's profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+    patch:
+      operationId: patchUsersMe
+      summary: Update own profile
+      description: >-
+        Updates the caller's profile fields. Every field is optional and
+        validated; EDD/LMP are updated via the pregnancy endpoint so week
+        computation stays consistent (FR-006). Emits `user.profile.updated`
+        with the changed fields when something actually changes.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/me/pregnancy:
+    put:
+      operationId: putUsersMePregnancy
+      summary: Set or update pregnancy start (EDD/LMP)
+      description: >-
+        Captures the expected delivery date and/or last menstrual period. At
+        least one of `edd`/`lmp` is required; dates are validated and the
+        pregnancy week (1–45) is computed through the pregnancy-engine
+        contract, stubbed until WP-019 (FR-006/FR-031). Emits
+        `user.profile.updated` when the record changes.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PregnancyRequest'
+      responses:
+        '200':
+          description: Updated pregnancy context with computed week/trimester.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PregnancyPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid dates or no EDD/LMP provided (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/me/preferences:
+    put:
+      operationId: putUsersMePreferences
+      summary: Set notification and content preferences
+      description: >-
+        Upserts the caller's preferences: language, notification channels and
+        frequency, quiet hours, and content categories (FR-038). All values are
+        validated against the documented enums and applied across surfaces.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferencesRequest'
+      responses:
+        '200':
+          description: Stored preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferencesPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid preference values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - phone
+        - first_name
+        - last_name
+        - language
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          description: E.164 phone number. Stored encrypted; never a primary key (FR-009).
+          example: '+251900000000'
+          pattern: '^\+[1-9]\d{7,14}$'
+        first_name:
+          type: string
+          description: Father's given name (FR-002).
+          minLength: 1
+          maxLength: 100
+        last_name:
+          type: string
+          description: Father's family name (FR-002).
+          minLength: 1
+          maxLength: 100
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (FR-002).
+          pattern: '^[A-Za-z]{2}$'
+        region:
+          type: string
+          description: Administrative region (FR-002).
+          minLength: 1
+          maxLength: 100
+        age_group:
+          type: string
+          description: Self-identified age band (FR-002).
+          minLength: 1
+          maxLength: 32
+        language:
+          type: string
+          description: Preferred language (FR-002/FR-038).
+          enum: [en, am]
+        cohort:
+          type: string
+          description: Referral/cohort tag for campaign attribution (FR-010).
+          minLength: 1
+          maxLength: 100
+        edd:
+          type: string
+          format: date
+          description: Expected delivery date (ISO 8601). At least one of edd/lmp must be present together.
+        lmp:
+          type: string
+          format: date
+          description: Last menstrual period date (ISO 8601). At least one of edd/lmp must be present together.
+
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        last_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+        region:
+          type: string
+          minLength: 1
+          maxLength: 100
+        age_group:
+          type: string
+          minLength: 1
+          maxLength: 32
+        language:
+          type: string
+          enum: [en, am]
+        cohort:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    UserPayload:
+      type: object
+      required:
+        - user_id
+        - phone_masked
+        - role
+        - status
+        - profile
+        - preferences
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Durable user id (FR-009).
+        phone_masked:
+          type: string
+          description: Masked phone (e.g. +2519****1111) — plaintext never leaves the service (QR-009 prep).
+        role:
+          type: string
+          enum: [father, partner, staff]
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        profile:
+          $ref: '#/components/schemas/ProfilePayload'
+        pregnancy:
+          $ref: '#/components/schemas/PregnancyPayload'
+        preferences:
+          $ref: '#/components/schemas/PreferencesPayload'
+
+    ProfilePayload:
+      type: object
+      required:
+        - first_name
+        - last_name
+      additionalProperties: false
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        country:
+          type: [string, 'null']
+        region:
+          type: [string, 'null']
+        age_group:
+          type: [string, 'null']
+        language:
+          type: [string, 'null']
+          enum: [en, am]
+        cohort:
+          type: [string, 'null']
+
+    PregnancyRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        edd:
+          type: string
+          format: date
+          description: Expected delivery date (ISO 8601).
+        lmp:
+          type: string
+          format: date
+          description: Last menstrual period date (ISO 8601).
+
+    PregnancyPayload:
+      type: object
+      required:
+        - pregnancy_week
+        - trimester
+      additionalProperties: false
+      properties:
+        edd:
+          type: [string, 'null']
+          format: date
+        lmp:
+          type: [string, 'null']
+          format: date
+        pregnancy_week:
+          type: integer
+          description: Computed pregnancy week, clamped to 1–45 (FR-031).
+          minimum: 1
+          maximum: 45
+        trimester:
+          type: integer
+          description: Computed trimester (1–3).
+          minimum: 1
+          maximum: 3
+
+    PreferencesRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        language:
+          type: string
+          enum: [en, am]
+        notification_channels:
+          type: array
+          description: Channels the user accepts for non-critical messages (FR-038).
+          items:
+            type: string
+            enum: [sms, whatsapp, push]
+          uniqueItems: true
+        quiet_hours:
+          $ref: '#/components/schemas/QuietHours'
+        content_categories:
+          type: array
+          description: Content topics the user opts into (FR-038).
+          items:
+            type: string
+            enum:
+              [
+                pregnancy_journey,
+                milestones,
+                nutrition,
+                health_risks,
+                birth_prep,
+                postpartum,
+                general,
+              ]
+          uniqueItems: true
+
+    QuietHours:
+      type: object
+      additionalProperties: false
+      properties:
+        start:
+          type: string
+          description: Local 24-hour time, HH:MM.
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+        end:
+          type: string
+          description: Local 24-hour time, HH:MM.
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+
+    PreferencesPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        language:
+          type: [string, 'null']
+          enum: [en, am]
+        notification_channels:
+          type: array
+          items:
+            type: string
+            enum: [sms, whatsapp, push]
+        quiet_hours:
+          $ref: '#/components/schemas/QuietHours'
+        content_categories:
+          type: array
+          items:
+            type: string
+            enum:
+              [
+                pregnancy_journey,
+                milestones,
+                nutrition,
+                health_risks,
+                birth_prep,
+                postpartum,
+                general,
+              ]
