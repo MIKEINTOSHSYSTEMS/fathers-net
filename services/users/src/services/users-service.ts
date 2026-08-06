@@ -4,7 +4,8 @@ import type { Logger } from '@fathersnet/logger';
 import type { PhoneEncryptor } from '../providers/phone-encryption';
 import { keyedDigest, maskPhone } from './crypto';
 import { publishUsersEvent } from './events';
-import type { PregnancyEngine } from './pregnancy';
+import { PregnancyService } from './pregnancy-service';
+import type { PregnancyEngine, PregnancySnapshot } from './pregnancy';
 import type { PreferencesUpsertInput, QuietHours, UsersStore } from './store/types';
 
 export interface UsersServiceOptions {
@@ -15,6 +16,8 @@ export interface UsersServiceOptions {
   /** Key for the keyed HMAC-SHA256 phone digest (05 §8.1). */
   phoneDigestKey: string;
   pregnancyEngine: PregnancyEngine;
+  /** Pregnancy recompute/status/event owner (WP-019). */
+  pregnancyService: PregnancyService;
   /** Injectable clock (milliseconds) for deterministic tests. */
   nowMs?: () => number;
 }
@@ -215,10 +218,7 @@ export class UsersService {
     return profile as UserProfileDto;
   }
 
-  async updatePregnancy(
-    userId: string,
-    input: UpdatePregnancyInput,
-  ): Promise<{ edd: string | null; lmp: string | null; pregnancyWeek: number; trimester: number }> {
+  async updatePregnancy(userId: string, input: UpdatePregnancyInput): Promise<PregnancySnapshot> {
     await this.requireUser(userId);
 
     const edd = input.edd ?? null;
@@ -237,17 +237,18 @@ export class UsersService {
       throw new ValidationError('Invalid pregnancy update', fields);
     }
 
-    const computation = this.computePregnancy({ edd, lmp });
-    const record = await this.options.store.upsertPregnancy(userId, {
-      edd,
-      lmp,
-      pregnancyWeek: computation.pregnancyWeek,
-      trimester: computation.trimester,
-    });
+    // Recompute-on-edit (FR-006): recompute week/trimester, persist the new
+    // computed state, and emit `pregnancy.week.changed`/`milestone.reached`
+    // only when something actually changed (WP-019).
+    const snapshot = await this.options.pregnancyService.refreshAfterEdit(
+      userId,
+      { edd, lmp },
+      input.requestId,
+    );
 
     this.options.logger.info('users.pregnancy_updated', 'pregnancy updated', {
       user_id: userId,
-      pregnancy_week: computation.pregnancyWeek,
+      pregnancy_week: snapshot.pregnancyWeek,
     });
 
     await publishUsersEvent(
@@ -259,12 +260,7 @@ export class UsersService {
       { type: 'user', id: userId },
     );
 
-    return {
-      edd: record.edd,
-      lmp: record.lmp,
-      pregnancyWeek: computation.pregnancyWeek,
-      trimester: computation.trimester,
-    };
+    return snapshot;
   }
 
   async updatePreferences(userId: string, input: UpdatePreferencesInput): Promise<UserProfileDto> {
