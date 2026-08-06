@@ -1,0 +1,30 @@
+{
+  "name": "@fathersnet/events",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider-agnostic event bus client, outbox relay, and canonical event vocabulary (06 §2.2, 03 §4.6; FR-160/FR-161)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@fathersnet/logger": "*",
+    "ioredis": "5.4.1",
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@fathersnet/idempotency": "*",
+    "@types/pg": "8.11.10"
+  }
+}
