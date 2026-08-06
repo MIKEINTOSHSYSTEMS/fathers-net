@@ -172,7 +172,23 @@ describe('users routes (SRS §12.3)', () => {
     expect(final.json().pregnancy).toMatchObject({ edd: '2025-10-01', pregnancyWeek: 9 });
 
     const events = eventBus.published.map((e) => e.type);
-    expect(events).toEqual(['user.enrolled', 'user.profile.updated', 'user.profile.updated']);
+    // PUT /me/pregnancy runs recompute-on-edit: `pregnancy.week.changed`
+    // (first capture, no previous week) then the legacy `user.profile.updated`.
+    expect(events).toEqual([
+      'user.enrolled',
+      'user.profile.updated',
+      'pregnancy.week.changed',
+      'user.profile.updated',
+    ]);
+    const weekChanged = eventBus.published.find((e) => e.type === 'pregnancy.week.changed');
+    expect(weekChanged?.producer).toBe('pregnancy-engine');
+    expect(weekChanged?.payload).toMatchObject({
+      user_id: userId,
+      week: 9,
+      trimester: 1,
+      edd: '2025-10-01',
+    });
+    expect(JSON.stringify(weekChanged)).not.toContain('Abebe');
   });
 
   it('returns 404 when the token subject is not a registered user', async () => {
@@ -479,6 +495,158 @@ describe('users routes (SRS §12.3)', () => {
       };
       const get = await app.inject({ method: 'GET', url: '/v1/users/me/consents', headers: ghost });
       expect(get.statusCode).toBe(404);
+    });
+  });
+
+  describe('internal pregnancy contract (WP-019, 06 §373)', () => {
+    const EDD = '2025-10-01';
+    let clockMs: number;
+
+    async function bootWithClock(initialNow: number): Promise<void> {
+      clockMs = initialNow;
+      await boot(
+        buildEnv(),
+        // each nowMs() call advances the clock by 1s so every computation
+        // is reproducible while still changing between calls
+        () => {
+          const t = clockMs;
+          clockMs += 1000;
+          return t;
+        },
+      );
+    }
+
+    async function registerWithPregnancy(
+      payload: Record<string, unknown>,
+    ): Promise<{ auth: Record<string, string>; userId: string }> {
+      const register = await app.inject({
+        method: 'POST',
+        url: '/v1/users/register',
+        payload: { phone: PHONE, first_name: 'A', last_name: 'B', language: 'en', ...payload },
+      });
+      expect(register.statusCode).toBe(201);
+      const userId = register.json().userId as string;
+      return { auth: { authorization: `Bearer ${signAccessToken(userId)}` }, userId };
+    }
+
+    it('serves the full journey snapshot without bearer auth', async () => {
+      await bootWithClock(new Date('2025-03-01T12:00:00Z').getTime());
+      const { userId } = await registerWithPregnancy({ edd: EDD });
+
+      const get = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(get.statusCode).toBe(200);
+      expect(get.json()).toMatchObject({
+        pregnancyWeek: 9,
+        trimester: 1,
+        edd: EDD,
+        lmp: null,
+        countdownDays: 214,
+        status: 'active',
+        milestones: [
+          { type: 'first_anc_visit', week: 12, date: '2025-03-19', reached: false },
+          { type: 'first_trimester_end', week: 13, date: '2025-03-26', reached: false },
+          { type: 'viability', week: 23, date: '2025-06-04', reached: false },
+          { type: 'birth', week: 40, date: EDD, reached: false },
+        ],
+      });
+      expect(get.json().milestones).toHaveLength(4);
+    });
+
+    it('returns 404 for a subject without a pregnancy and 422 for a malformed id', async () => {
+      await bootWithClock(new Date('2025-03-01T12:00:00Z').getTime());
+      const { userId } = await registerWithPregnancy({ first_name: 'NoEdd' });
+      const noPregnancy = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(noPregnancy.statusCode).toBe(404);
+      expect(noPregnancy.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+
+      const ghost = await app.inject({
+        method: 'GET',
+        url: '/v1/users/internal/pregnancy/00000000-0000-4000-8000-000000000000',
+      });
+      expect(ghost.statusCode).toBe(404);
+
+      const malformed = await app.inject({
+        method: 'GET',
+        url: '/v1/users/internal/pregnancy/not-a-uuid',
+      });
+      expect(malformed.statusCode).toBe(422);
+      expect(malformed.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    });
+
+    it('lazily rolls the stored week forward as time advances (FR-031)', async () => {
+      await bootWithClock(new Date('2025-03-01T12:00:00Z').getTime());
+      const { userId } = await registerWithPregnancy({ edd: EDD });
+
+      const weekOne = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(weekOne.json().pregnancyWeek).toBe(9);
+      expect(weekOne.json().countdownDays).toBe(214);
+      // Registration establishes the record; no week has "changed" yet.
+      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(0);
+
+      clockMs += 7 * 24 * 60 * 60 * 1000;
+
+      const weekTwo = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(weekTwo.json()).toMatchObject({ pregnancyWeek: 10, countdownDays: 207 });
+      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+      const rollover = eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')[0];
+      expect(rollover.producer).toBe('pregnancy-engine');
+      expect(rollover.payload).toMatchObject({ user_id: userId, week: 10, trimester: 1, edd: EDD });
+
+      const weekThree = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(weekThree.json().pregnancyWeek).toBe(10);
+      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+    });
+
+    it('emits milestone.reached when the journey crosses a milestone week', async () => {
+      await bootWithClock(new Date('2025-03-01T12:00:00Z').getTime());
+      const { userId } = await registerWithPregnancy({ edd: '2025-09-20' });
+
+      const before = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(before.json().pregnancyWeek).toBe(11);
+      expect(eventBus.published.filter((e) => e.type === 'milestone.reached')).toHaveLength(0);
+
+      clockMs += 7 * 24 * 60 * 60 * 1000;
+
+      const after = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(after.json().pregnancyWeek).toBe(12);
+      const reached = eventBus.published.find((e) => e.type === 'milestone.reached');
+      expect(reached).toBeTruthy();
+      expect(reached!.producer).toBe('pregnancy-engine');
+      expect(reached!.payload).toMatchObject({
+        user_id: userId,
+        milestone: 'first_anc_visit',
+        week: 12,
+      });
+      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+
+      const repeat = await app.inject({
+        method: 'GET',
+        url: `/v1/users/internal/pregnancy/${userId}`,
+      });
+      expect(repeat.json().pregnancyWeek).toBe(12);
+      expect(eventBus.published.filter((e) => e.type === 'milestone.reached')).toHaveLength(1);
+      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
     });
   });
 });

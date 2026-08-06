@@ -2,9 +2,10 @@ import { createTestLogger, type RecordedLog } from '@fathersnet/test-utils';
 import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { ConflictError, NotFoundError, ValidationError } from '@fathersnet/errors';
 import { UsersService } from '../src/services/users-service';
+import { PregnancyService } from '../src/services/pregnancy-service';
 import { createMemoryUsersStore } from '../src/services/store/memory-store';
 import { createAesGcmPhoneEncryptor } from '../src/providers/phone-encryption';
-import { createPregnancyEngineStub } from '../src/services/pregnancy';
+import { createPregnancyEngine } from '../src/services/pregnancy';
 
 describe('UsersService (WP-017, SRS §12.3)', () => {
   const PHONE = '+251900000000';
@@ -20,13 +21,23 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
     eventBus = createInMemoryEventBus();
     const { logger, logs: recorded } = createTestLogger('debug');
     logs = recorded;
+    const store = createMemoryUsersStore();
+    const engine = createPregnancyEngine();
+    const pregnancyService = new PregnancyService({
+      store,
+      eventBus,
+      logger,
+      engine,
+      nowMs: () => NOW,
+    });
     service = new UsersService({
-      store: createMemoryUsersStore(),
+      store,
       eventBus,
       logger,
       phoneEncryptor: createAesGcmPhoneEncryptor(ENC_KEY),
       phoneDigestKey: DIGEST_KEY,
-      pregnancyEngine: createPregnancyEngineStub(),
+      pregnancyEngine: engine,
+      pregnancyService,
       nowMs: () => NOW,
     });
   }
@@ -107,7 +118,7 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
     });
   });
 
-  it('computes week/trimester via the pregnancy-engine stub when EDD/LMP provided', async () => {
+  it('computes week/trimester via the pregnancy engine when EDD/LMP provided', async () => {
     const result = await service.register({
       phone: PHONE,
       firstName: 'A',

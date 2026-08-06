@@ -6,11 +6,13 @@ info:
     User & profile service contract (AR-003). Implements the SRS §12.3 User
     Profile APIs for WP-017/WP-018: father registration (FR-001/FR-002,
     UC-001), profile CRUD (FR-002), pregnancy start capture routed to the
-    pregnancy engine contract (stubbed until WP-019; FR-006/FR-031),
-    cohort/referral tagging (FR-010), preferences (FR-038), and the versioned
-    append-only consent lifecycle (FR-003/FR-004/FR-125/FR-117, AR-012). Emits
-    `user.enrolled`, `user.profile.updated`, and `user.consent.changed` on the
-    event bus.
+    pregnancy engine (WP-019; FR-006/FR-031/FR-037), cohort/referral tagging
+    (FR-010), preferences (FR-038), and the versioned append-only consent
+    lifecycle (FR-003/FR-004/FR-125/FR-117, AR-012). WP-019 also adds the
+    internal service-to-service journey contract (06 §373) consumed by
+    WhatsApp/content personalization. Emits `user.enrolled`,
+    `user.profile.updated`, `user.consent.changed`, `pregnancy.week.changed`,
+    and `milestone.reached` on the event bus.
 
     Identity is established by WP-016 authentication: every endpoint requires
     a Bearer access token, and all `me` endpoints bind to the token `sub`
@@ -164,9 +166,11 @@ paths:
       description: >-
         Captures the expected delivery date and/or last menstrual period. At
         least one of `edd`/`lmp` is required; dates are validated and the
-        pregnancy week (1–45) is computed through the pregnancy-engine
-        contract, stubbed until WP-019 (FR-006/FR-031). Emits
-        `user.profile.updated` when the record changes.
+        pregnancy week (1–45) is computed by the pregnancy engine (WP-019,
+        FR-006/FR-031). Recompute is idempotent: emits
+        `pregnancy.week.changed` and `milestone.reached` only when the week or
+        a milestone is newly crossed, plus `user.profile.updated` when the
+        record changes.
       tags: [users]
       requestBody:
         required: true
@@ -201,6 +205,51 @@ paths:
                 $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
         '422':
           description: Invalid dates or no EDD/LMP provided (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/internal/pregnancy/{userId}:
+    get:
+      operationId: getUsersInternalPregnancy
+      summary: Internal pregnancy journey snapshot (service-to-service)
+      description: >-
+        Internal contract (06 §373, WP-019): the authoritative computed
+        journey state for a user — week, trimester, EDD countdown, status, and
+        the milestone schedule. The call rolls the stored week/trimester
+        forward as time advances (FR-031) and emits `pregnancy.week.changed`
+        / `milestone.reached` on rollover or recompute. This endpoint is a
+        trusted peer-service contract, not a client API: it is deliberately
+        unauthenticated at the application layer (network isolation is the
+        Phase 2 boundary) and serves no PII. 404 when the subject has no
+        pregnancy record.
+      tags: [users]
+      security: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: The durable user id (uuid).
+          schema:
+            type: string
+            format: uuid
+            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      responses:
+        '200':
+          description: Computed journey snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PregnancySnapshotPayload'
+        '404':
+          description: No pregnancy record for the subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed user id (standard envelope).
           content:
             application/json:
               schema:
@@ -577,6 +626,73 @@ components:
           description: Computed trimester (1–3).
           minimum: 1
           maximum: 3
+
+    PregnancyMilestonePayload:
+      type: object
+      required:
+        - type
+        - week
+        - date
+        - reached
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          description: Milestone kind (FR-033).
+          enum: [first_anc_visit, first_trimester_end, viability, birth]
+        week:
+          type: integer
+          description: Week at which the milestone is due, in the same week semantics as the active pregnancy week.
+          minimum: 1
+          maximum: 45
+        date:
+          type: string
+          format: date
+          description: Date the milestone is due (FR-037).
+        reached:
+          type: boolean
+          description: True when the milestone date is today or earlier.
+
+    PregnancySnapshotPayload:
+      type: object
+      required:
+        - edd
+        - lmp
+        - pregnancy_week
+        - trimester
+        - countdown_days
+        - status
+        - milestones
+      additionalProperties: false
+      properties:
+        edd:
+          type: [string, 'null']
+          format: date
+          description: Effective EDD — the anchor itself, or LMP + 280 days when only LMP is known.
+        lmp:
+          type: [string, 'null']
+          format: date
+        pregnancy_week:
+          type: integer
+          description: Computed pregnancy week, clamped to 1–45 (FR-031).
+          minimum: 1
+          maximum: 45
+        trimester:
+          type: integer
+          minimum: 1
+          maximum: 3
+        countdown_days:
+          type: integer
+          description: Days until the effective EDD; negative once overdue (FR-037).
+        status:
+          type: string
+          description: Journey status (FR-034).
+          enum: [active, overdue]
+        milestones:
+          type: array
+          description: Fixed milestone schedule, oldest first (FR-033).
+          items:
+            $ref: '#/components/schemas/PregnancyMilestonePayload'
 
     PreferencesRequest:
       type: object

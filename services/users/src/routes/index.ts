@@ -1,13 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
+import { NotFoundError } from '@fathersnet/errors';
 import type { UsersService } from '../services/users-service';
 import type { ConsentType } from '../services/store/types';
 import type { ConsentsService } from '../services/consents-service';
+import type { PregnancyService } from '../services/pregnancy-service';
 
 export interface UsersRouteDeps {
   usersService: UsersService;
   consentsService: ConsentsService;
+  pregnancyService: PregnancyService;
   eventBus: EventBus;
   logger: Logger;
 }
@@ -109,6 +112,17 @@ const ConsentIdParams = {
   required: ['id'],
   properties: {
     id: {
+      type: 'string',
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    },
+  },
+} as const;
+
+const InternalUserIdParams = {
+  type: 'object',
+  required: ['userId'],
+  properties: {
+    userId: {
       type: 'string',
       pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
     },
@@ -236,6 +250,31 @@ export async function usersMeRoutes(app: FastifyInstance, deps: UsersRouteDeps):
         consentId: params.id,
         requestId: request.id,
       });
+    },
+  );
+}
+
+/**
+ * Internal service-to-service contract (06 §373, WP-019): the authoritative
+ * pregnancy journey snapshot consumed by the users-service responses and,
+ * later, WhatsApp/content personalization. Serves current computed state and
+ * rolls the stored week/trimester forward as time advances (FR-031). Returns
+ * 404 when the subject has no pregnancy record.
+ */
+export async function internalPregnancyRoute(
+  app: FastifyInstance,
+  deps: UsersRouteDeps,
+): Promise<void> {
+  app.get(
+    '/internal/pregnancy/:userId',
+    { schema: { params: InternalUserIdParams } },
+    async (request) => {
+      const params = request.params as { userId: string };
+      const snapshot = await deps.pregnancyService.getStatus(params.userId);
+      if (!snapshot) {
+        throw new NotFoundError('Pregnancy not found');
+      }
+      return snapshot;
     },
   );
 }

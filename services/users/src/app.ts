@@ -6,12 +6,18 @@ import type { UsersConfig } from './config';
 import { buildGenReqId, requestIdPlugin, REQUEST_ID_HEADER } from './middleware/request-id';
 import { errorHandler } from './middleware/errors';
 import { requireBearerPlugin } from './middleware/auth';
-import { usersMeRoutes, usersRegisterRoute, type UsersRouteDeps } from './routes';
+import {
+  usersMeRoutes,
+  usersRegisterRoute,
+  internalPregnancyRoute,
+  type UsersRouteDeps,
+} from './routes';
 import { createUsersStore, type UsersStore } from './services/store';
 import { UsersService } from './services/users-service';
 import { ConsentsService } from './services/consents-service';
+import { PregnancyService } from './services/pregnancy-service';
 import { createTokenVerifier, type TokenVerifier } from './services/tokens';
-import { createPregnancyEngineStub, type PregnancyEngine } from './services/pregnancy';
+import { createPregnancyEngine, type PregnancyEngine } from './services/pregnancy';
 import { createAesGcmPhoneEncryptor, type PhoneEncryptor } from './providers/phone-encryption';
 import { createRedisClient } from './services/redis';
 
@@ -24,7 +30,7 @@ export interface UsersAppOptions {
   tokenVerifier?: TokenVerifier;
   /** Test seam: inject a phone encryptor (defaults to AES-256-GCM). */
   phoneEncryptor?: PhoneEncryptor;
-  /** Test seam: inject a pregnancy engine (defaults to the WP-017 stub). */
+  /** Test seam: inject a pregnancy engine (defaults to the full WP-019 engine). */
   pregnancyEngine?: PregnancyEngine;
   /** Test seam: inject an in-memory event bus instead of the broker. */
   eventBus?: EventBus;
@@ -80,7 +86,7 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
 
   const phoneEncryptor: PhoneEncryptor =
     options.phoneEncryptor ?? createAesGcmPhoneEncryptor(config.FN_USERS_PHONE_ENC_KEY);
-  const pregnancyEngine: PregnancyEngine = options.pregnancyEngine ?? createPregnancyEngineStub();
+  const pregnancyEngine: PregnancyEngine = options.pregnancyEngine ?? createPregnancyEngine();
   const tokenVerifier: TokenVerifier =
     options.tokenVerifier ??
     createTokenVerifier(
@@ -90,6 +96,13 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
     );
   const nowMs = options.nowMs ?? Date.now;
 
+  const pregnancyService = new PregnancyService({
+    store,
+    eventBus,
+    logger,
+    engine: pregnancyEngine,
+    nowMs,
+  });
   const usersService = new UsersService({
     store,
     eventBus,
@@ -97,10 +110,17 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
     phoneEncryptor,
     phoneDigestKey: config.FN_USERS_PHONE_DIGEST_KEY,
     pregnancyEngine,
+    pregnancyService,
     nowMs,
   });
   const consentsService = new ConsentsService({ store, eventBus, logger, nowMs });
-  const deps: UsersRouteDeps = { usersService, consentsService, eventBus, logger };
+  const deps: UsersRouteDeps = {
+    usersService,
+    consentsService,
+    pregnancyService,
+    eventBus,
+    logger,
+  };
 
   app.addHook('onClose', async () => {
     await store.dispose();
@@ -119,6 +139,15 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
     async (api) => {
       await requireBearerPlugin(api, tokenVerifier);
       await usersMeRoutes(api, deps);
+    },
+    { prefix: '/v1/users' },
+  );
+
+  // Internal service-to-service contracts (06 §373): no bearer auth — network
+  // isolation is the Phase 2 boundary; the caller is a trusted peer service.
+  await app.register(
+    async (api) => {
+      await internalPregnancyRoute(api, deps);
     },
     { prefix: '/v1/users' },
   );
