@@ -163,7 +163,7 @@ Path versioning `/v1/`; `Sunset` / `Deprecation` response headers on deprecated 
 
 All timelines are **Configurable reference estimates** aligned with SRS Appendix D. Each phase is independently releasable, deployable, and gated by the quality checks in §6.
 
-> **Migration numbering (this plan vs `05`).** Database schema detail is owned by `05-database-implementation-plan.md` §4.2, which is authoritative for migration IDs and grouping. The per-phase "Database changes" bullets below reference `05` §4.2 migration IDs; they do **not** define a competing `000N` sequence. Tables listed in a phase that are **not** in the `05` §4.2 catalog (e.g., `reminder_templates`, `shared_journey_links`, `data_export_jobs`, `whatsapp_templates`, `support_tickets`) are engineering additions that must be added to `05` §4.2 (with schema approval + a `decision-log.md` entry) before that phase lands. The auth tables proposed in Phase B are subject to the pending auth-state storage decision (`05` §4.3).
+> **Migration numbering (this plan vs `05`).** Database schema detail is owned by `05-database-implementation-plan.md` §4.2, which is authoritative for migration IDs and grouping. The per-phase "Database changes" bullets below reference `05` §4.2 migration IDs; they do **not** define a competing `000N` sequence. Tables listed in a phase that are **not** in the `05` §4.2 catalog (e.g., `reminder_templates`, `shared_journey_links`, `data_export_jobs`, `whatsapp_templates`, `support_tickets`) are engineering additions that must be added to `05` §4.2 (with schema approval + a `decision-log.md` entry) before that phase lands. The auth tables proposed in Phase B are subject to the **closed** auth-state storage decision (`05` §4.3 — **DECIDED 2026-08-06, Option A: Redis-only**; no auth tables in Phase 2).
 
 ---
 
@@ -218,7 +218,7 @@ fathers-net/
 
 **Components.**
 - Auth Service: OTP issue/verify with constant-time comparison and failure lockout (§12.2); JWT access tokens (RS256/ES256, default 15-min TTL, Configurable) + refresh tokens (default 30 days, revocable, rotation with reuse-detection) (§14.6); device-fingerprint capture; OTP delivery via notification provider adapter (SMS primary; WhatsApp template fallback, Configurable) (FR-152).
-- OTP store (Redis + Postgres record): expiry, max attempts 5/15 min, lockout counters (for §14.1.1 detection).
+- OTP store (Redis, per `05` §4.3 Option A — DECIDED 2026-08-06): expiry, max attempts 5/15 min, lockout counters (for §14.1.1 detection).
 - Gateway auth middleware: bearer verification, token version/revocation checks, token-type claim enforcement (refresh vs access).
 - Admin/MFA credential model (staff accounts, password hashing with Argon2id) ready for Phase L.
 
@@ -246,7 +246,7 @@ services/auth/
 | `/v1/auth/refresh` | POST | Rotate refresh token; issue new access token |
 | `/v1/auth/logout` | POST | Revoke current session/token |
 
-**Database changes.** Auth tables `otp_codes` (id, phone_hash, purpose, code_hash, expires_at, attempts, locked_until), `refresh_tokens` (id, user_id, token_hash, rotated_from, revoked_at, expires_at), `staff_users` + `staff_mfa` (placeholder role model for Phase L) — **placement pending** the auth-state storage decision (`05` §4.3): if a Postgres record is chosen they land as a `05` §4.2 migration (proposed append as `018`); if Redis-only they are not created (state in Redis per `03` §3.1 / `11` §3.2). No OTP/token values stored in plaintext.
+**Database changes.** **DECIDED 2026-08-06 (Project Owner): Option A — Redis-only auth state** (`05` §4.3; `decision-log.md` D-09). The four auth tables (`otp_codes`, `refresh_tokens`, `staff_users`, `staff_mfa`) are **not created in Phase 2**; OTP state, revoked-token checks, and rotation reuse-detection live in Redis per `03` §3.1 / `11` §3.2 via a provider-agnostic adapter + test-double (M-08). No migration `018`; migration baseline unchanged. Only **hashed** OTP/token values are stored (`code_hash`/`token_hash`); no OTP/token values stored in plaintext. Revoked-refresh-set retention ≥ refresh-token lifetime (default 30 d). Full rotation + reuse-detection enhancements are Phase 3 (WP-025) responsibility; if durable rotation history/audit is then required, Option B (`05` §4.2 append `018`) remains the documented upgrade path. `staff_users`/`staff_mfa` (Phase L staff model) remain deferred and may be decided separately.
 
 **Tests required.** Unit: OTP generation/expiry/lockout, constant-time compare, token claims, refresh rotation and reuse-detection (reuse ⇒ revoke family). Integration: full OTP→verify→refresh→logout flow against Postgres; rate-limit lockout at 5/15 min; revocation on logout. Contract: `auth.yaml` schema validation. Security: no PII or OTP in logs (assert in tests); brute-force lockout test (QR-007 prep).
 
