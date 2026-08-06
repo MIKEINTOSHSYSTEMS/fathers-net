@@ -1,6 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["tsconfig.base.json", ".eslintrc.cjs", ".prettierrc.json"],
+  "globalPassThroughEnv": ["REDIS_TEST_URL", "DATABASE_URL"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
