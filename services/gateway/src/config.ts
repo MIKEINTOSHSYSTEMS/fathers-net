@@ -15,6 +15,9 @@ export interface GatewayConfig {
   FN_RATE_LIMIT_ADMIN_EXPORT: number;
   FN_RATE_LIMIT_WINDOW_SECONDS: number;
   FN_IDEMPOTENCY_TTL_SECONDS: number;
+  FN_AUTH_JWT_SECRET: string;
+  FN_AUTH_ISSUER: string;
+  FN_AUTH_AUDIENCE: string;
 }
 
 const SCHEMA = {
@@ -36,6 +39,13 @@ const SCHEMA = {
   FN_RATE_LIMIT_ADMIN_EXPORT: { type: 'number', default: '10', min: 1, max: 100000 },
   FN_RATE_LIMIT_WINDOW_SECONDS: { type: 'number', default: '60', min: 1, max: 86400 },
   FN_IDEMPOTENCY_TTL_SECONDS: { type: 'number', default: '86400', min: 1, max: 604800 },
+  // Empty (unset) => Bearer tokens pass through unvalidated (pre-WP-016 dev
+  // mode). When set, the gateway validates access JWTs signed with the auth
+  // service's shared secret. Failing closed on absent config is safe: no
+  // secret, no claims, no authenticated identity.
+  FN_AUTH_JWT_SECRET: { type: 'string', default: '' },
+  FN_AUTH_ISSUER: { type: 'string', default: 'fathersnet' },
+  FN_AUTH_AUDIENCE: { type: 'string', default: 'fathersnet-api' },
 } as const;
 
 export function loadGatewayConfig(source: NodeJS.ProcessEnv = process.env): GatewayConfig {
@@ -55,6 +65,9 @@ export function loadGatewayConfig(source: NodeJS.ProcessEnv = process.env): Gate
     FN_RATE_LIMIT_ADMIN_EXPORT: parsed.FN_RATE_LIMIT_ADMIN_EXPORT as number,
     FN_RATE_LIMIT_WINDOW_SECONDS: parsed.FN_RATE_LIMIT_WINDOW_SECONDS as number,
     FN_IDEMPOTENCY_TTL_SECONDS: parsed.FN_IDEMPOTENCY_TTL_SECONDS as number,
+    FN_AUTH_JWT_SECRET: parsed.FN_AUTH_JWT_SECRET as string,
+    FN_AUTH_ISSUER: parsed.FN_AUTH_ISSUER as string,
+    FN_AUTH_AUDIENCE: parsed.FN_AUTH_AUDIENCE as string,
   };
   return config;
 }

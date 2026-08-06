@@ -5,9 +5,11 @@ info:
   description: >-
     Public entry point for the FathersNet (Ayay) platform. Exposes operational
     health endpoints and the platform v1 surface — smoke routes exercising the
-    WP-015 middleware: CORS allow-list, auth pass-through, rate limiting
-    (FR-169) and idempotency (FR-161). Business routes land in later work
-    packages and are added here first (AR-003 — contract as source of truth).
+    WP-015 middleware: CORS allow-list, Bearer pass-through, rate limiting
+    (FR-169) and idempotency (FR-161). Bearer access tokens are validated at
+    the gateway (WP-016) when the shared auth secret is configured. Business
+    routes land in later work packages and are added here first (AR-003 —
+    contract as source of truth).
   contact:
     name: FathersNet Engineering
   license:
@@ -173,6 +175,7 @@ components:
         - version
         - env
         - authenticated
+        - subject_id
       properties:
         status:
           type: string
@@ -188,8 +191,16 @@ components:
         authenticated:
           type: boolean
           description: >-
-            True when a Bearer token was presented to the gateway. Pass-through
-            only — token validation lands in WP-016.
+            True when a valid Bearer access token was presented to the gateway
+            and validated (WP-016). Without FN_AUTH_JWT_SECRET configured the
+            gateway passes tokens through and reports pass-through presence.
+        subject_id:
+          type:
+            - string
+            - 'null'
+          description: >-
+            Subject UUID from a validated access token, or null when
+            unauthenticated / validation disabled.
         uptime:
           type: number
           format: float

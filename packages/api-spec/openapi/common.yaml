@@ -21,10 +21,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: >-
-        Bearer token pass-through (WP-015). The gateway records whether a
-        bearer token was presented (request.identity) but does NOT validate it
-        yet; token validation lands in WP-016. Operations may declare this
-        scheme — enforcement is deferred until WP-016.
+        Bearer access-token validation (WP-016). The gateway validates HS256
+        JWTs signed by the auth service (signature, issuer, audience, expiry,
+        typ=access) when FN_AUTH_JWT_SECRET is configured, exposing the
+        resolved identity on request.identity; without the secret configured it
+        records token presence only (WP-015 pass-through). Operations may
+        declare this scheme; per-route enforcement is the owning service's job.
 
   parameters:
     IdempotencyKey:

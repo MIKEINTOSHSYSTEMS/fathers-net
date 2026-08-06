@@ -3,12 +3,17 @@ info:
   title: FathersNet Auth Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the authentication/authorization service contract (AR-003).
-    Planned resources (from implementation-plan/06 Phase B): phone/OTP login
-    (FR-108), session and token issuance, user token revocation. Contracts are
-    defined here BEFORE implementation; paths land with the corresponding work
-    package. Enforcement of the bearerAuth scheme at the gateway is deferred to
-    WP-016.
+    Authentication service contract (AR-003). Implements the SRS §12.2
+    Authentication APIs for WP-016: OTP request/verify with constant-time
+    comparison, expiry, and a 5-attempt / 15-minute lockout (FR-005); short-lived
+    JWT access tokens (default 15 min) with revocable refresh tokens (default
+    30 days) per §14.6; and session revocation. Full refresh-token rotation +
+    reuse detection are reserved for Phase 3 (WP-025, decision-log.md D-09).
+
+    OTP and session state is Redis-only (D-09) behind a provider-agnostic store
+    adapter; only hashed values are ever persisted (code_hash / token_hash —
+    never plaintext OTP or tokens). The contract never exposes OTP values,
+    plaintext tokens, or phone numbers outside the request body.
   contact:
     name: FathersNet Engineering
   license:
@@ -16,14 +21,276 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3100
+    description: Local development auth service (nginx terminates TLS in deployment).
 
+# otp/request and otp/verify are unauthenticated; refresh and logout present a
+# token and validate it in their own handler (the gateway never sees them).
 security: []
 
-paths: {}
+paths:
+  /v1/auth/otp/request:
+    post:
+      operationId: postAuthOtpRequest
+      summary: Request an OTP for phone verification
+      description: >-
+        Generates a one-time passcode for the given E.164 phone number and
+        dispatches it through the configured delivery provider (a test-double in
+        Phase 2, M-02). Rate-limited to 5 requests per 15 minutes per phone
+        (SRS §12.2, FR-005). A valid request always returns success; the
+        response never indicates whether a code was actually delivered, and the
+        code is never logged (FR-022).
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpRequest'
+      responses:
+        '200':
+          description: OTP requested; delivery happens asynchronously.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpRequestedPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Rate limit exceeded (5 requests / 15 minutes per phone).
+          headers:
+            Retry-After:
+              $ref: './common.yaml#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/auth/otp/verify:
+    post:
+      operationId: postAuthOtpVerify
+      summary: Verify an OTP and obtain tokens
+      description: >-
+        Compares the submitted code against the stored hash in constant time
+        (never plaintext comparison). Locks the phone for 15 minutes after 5
+        failed attempts (FR-005, SRS §12.2). On success issues a short-lived
+        access token and a revocable refresh token (SRS §14.6).
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: OTP accepted; token pair issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid or expired OTP (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Phone locked due to too many failed attempts.
+          headers:
+            Retry-After:
+              $ref: './common.yaml#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/auth/refresh:
+    post:
+      operationId: postAuthRefresh
+      summary: Exchange a refresh token for a new access token
+      description: >-
+        Validates the presented refresh token (hashed lookup, not revoked) and
+        issues a fresh access token. Rotation of the refresh token is reserved
+        for Phase 3 (WP-025); the same refresh token remains valid until its
+        expiry or revocation (D-09).
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: New access token issued for the validated session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPayload'
+        '401':
+          description: Missing, invalid, expired, or revoked refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Refresh token is revoked (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/auth/logout:
+    post:
+      operationId: postAuthLogout
+      summary: Revoke the current session
+      description: >-
+        Revokes the presented refresh token, terminating the session. Access
+        tokens are short-lived (default 15 min) and expire on their own; a
+        revoked refresh token can no longer be exchanged (SRS §14.6). Emits
+        `auth.session.revoked` on the event bus.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '200':
+          description: Session revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, invalid, expired, or revoked refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    OtpRequest:
+      type: object
+      required:
+        - phone
+        - channel
+        - purpose
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          description: Phone number in E.164 format. Never a primary key (FR-009).
+          example: '+251900000000'
+          pattern: '^\+[1-9]\d{7,14}$'
+        channel:
+          type: string
+          enum: [sms, whatsapp]
+          description: Delivery channel preference (provider adapter, M-02).
+        purpose:
+          type: string
+          enum: [registration, login]
+          description: Why the OTP is being requested.
+
+    OtpRequestedPayload:
+      type: object
+      required:
+        - status
+        - expires_in
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [sent]
+        expires_in:
+          type: integer
+          description: OTP validity window in seconds.
+
+    OtpVerifyRequest:
+      type: object
+      required:
+        - phone
+        - otp_code
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          description: Phone number in E.164 format, as used in otp/request.
+          pattern: '^\+[1-9]\d{7,14}$'
+        otp_code:
+          type: string
+          description: The submitted one-time passcode.
+          pattern: '^\d{6}$'
+
+    TokenPayload:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - expires_in
+      additionalProperties: false
+      properties:
+        access_token:
+          type: string
+          description: Short-lived JWT (default 15 min) for Bearer authentication.
+        refresh_token:
+          type: string
+          description: Opaque, revocable refresh token (default 30 days).
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Access token lifetime in seconds.
+
+    LogoutRequest:
+      type: object
+      required:
+        - refresh_token
+      additionalProperties: false
+      properties:
+        refresh_token:
+          type: string
+          description: The refresh token whose session should be revoked.
+
+    LogoutPayload:
+      type: object
+      required:
+        - status
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [revoked]

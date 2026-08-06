@@ -116,6 +116,47 @@ services:
       retries: 3
       start_period: 5s
 
+  auth:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    environment:
+      ENV: ${ENV:-dev}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FN_PORT: '3100'
+      FN_HOST: 0.0.0.0
+      FN_SERVICE_NAME: auth
+      FN_REDIS_URL: redis://redis:6379
+      FN_STORE_DRIVER: redis
+      FN_AUTH_JWT_SECRET: ${FN_AUTH_JWT_SECRET}
+      FN_AUTH_ISSUER: ${FN_AUTH_ISSUER:-fathersnet}
+      FN_AUTH_AUDIENCE: ${FN_AUTH_AUDIENCE:-fathersnet-api}
+      FN_AUTH_ACCESS_TTL_SECONDS: ${FN_AUTH_ACCESS_TTL_SECONDS:-900}
+      FN_AUTH_REFRESH_TTL_SECONDS: ${FN_AUTH_REFRESH_TTL_SECONDS:-2592000}
+      FN_AUTH_OTP_TTL_SECONDS: ${FN_AUTH_OTP_TTL_SECONDS:-300}
+      FN_AUTH_OTP_LENGTH: ${FN_AUTH_OTP_LENGTH:-6}
+      FN_AUTH_OTP_MAX_REQUESTS: ${FN_AUTH_OTP_MAX_REQUESTS:-5}
+      FN_AUTH_OTP_REQUEST_WINDOW_SECONDS: ${FN_AUTH_OTP_REQUEST_WINDOW_SECONDS:-900}
+      FN_AUTH_OTP_MAX_ATTEMPTS: ${FN_AUTH_OTP_MAX_ATTEMPTS:-5}
+      FN_AUTH_OTP_LOCKOUT_SECONDS: ${FN_AUTH_OTP_LOCKOUT_SECONDS:-900}
+    ports:
+      - '3100:3100'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3100/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   nginx:
     <<: *common
     image: nginx:1.27-alpine
