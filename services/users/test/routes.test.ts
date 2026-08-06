@@ -36,7 +36,7 @@ describe('users routes (SRS §12.3)', () => {
   let app: FastifyInstance;
   let eventBus: InMemoryEventBus;
 
-  async function boot(env: NodeJS.ProcessEnv = buildEnv()): Promise<void> {
+  async function boot(env: NodeJS.ProcessEnv = buildEnv(), nowMs?: () => number): Promise<void> {
     const config = loadUsersConfig(env);
     eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('debug');
@@ -44,7 +44,7 @@ describe('users routes (SRS §12.3)', () => {
       config,
       eventBus,
       logger,
-      nowMs: () => new Date('2025-03-01T12:00:00Z').getTime(),
+      nowMs: nowMs ?? (() => new Date('2025-03-01T12:00:00Z').getTime()),
     });
     await app.ready();
   }
@@ -253,5 +253,232 @@ describe('users routes (SRS §12.3)', () => {
     };
     const me = await app.inject({ method: 'GET', url: '/v1/users/me', headers: auth });
     expect(me.body).not.toContain('911111111');
+  });
+
+  describe('consent lifecycle routes (WP-018, SRS §12.3, AR-012)', () => {
+    let clockMs: number;
+    // The consent stream orders records by (granted_at, id); a distinct
+    // timestamp per write mirrors the DB's per-insert now().
+    function advancingClock(): () => number {
+      return () => {
+        const t = clockMs;
+        clockMs += 1000;
+        return t;
+      };
+    }
+
+    async function bootConsents(): Promise<void> {
+      clockMs = new Date('2025-03-01T12:00:00Z').getTime();
+      await boot(undefined, advancingClock());
+    }
+
+    async function registerAndAuth(
+      phone = PHONE,
+    ): Promise<{ auth: Record<string, string>; userId: string }> {
+      const register = await app.inject({
+        method: 'POST',
+        url: '/v1/users/register',
+        payload: { phone, first_name: 'Abebe', last_name: 'Kebede', language: 'en' },
+      });
+      expect(register.statusCode).toBe(201);
+      const userId = register.json().userId as string;
+      return { auth: { authorization: `Bearer ${signAccessToken(userId)}` }, userId };
+    }
+
+    it('requires a bearer token for every consent endpoint', async () => {
+      await bootConsents();
+      const get = await app.inject({ method: 'GET', url: '/v1/users/me/consents' });
+      expect(get.statusCode).toBe(401);
+      const post = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        payload: { consent_type: 'participation', version: 'v1.0' },
+      });
+      expect(post.statusCode).toBe(401);
+      const withdraw = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents/00000000-0000-4000-8000-000000000000/withdraw',
+      });
+      expect(withdraw.statusCode).toBe(401);
+    });
+
+    it('runs the consent lifecycle end-to-end: grant -> view -> withdraw -> re-consent', async () => {
+      await bootConsents();
+      const { auth } = await registerAndAuth();
+
+      const grant = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'participation', version: 'v1.0' },
+      });
+      expect(grant.statusCode).toBe(201);
+      expect(grant.json()).toMatchObject({
+        consentType: 'participation',
+        version: 'v1.0',
+        state: 'granted',
+        withdrawnAt: null,
+      });
+      const grantId = grant.json().id as string;
+
+      const view = await app.inject({ method: 'GET', url: '/v1/users/me/consents', headers: auth });
+      expect(view.statusCode).toBe(200);
+      expect(view.json().consents).toHaveLength(1);
+      expect(view.json().consents[0]).toMatchObject({
+        consentType: 'participation',
+        state: 'granted',
+        version: 'v1.0',
+      });
+      expect(view.json().consents[0].history).toHaveLength(1);
+
+      const withdraw = await app.inject({
+        method: 'POST',
+        url: `/v1/users/me/consents/${grantId}/withdraw`,
+        headers: auth,
+      });
+      expect(withdraw.statusCode).toBe(200);
+      expect(withdraw.json()).toMatchObject({ state: 'withdrawn', consentType: 'participation' });
+
+      const afterWithdraw = await app.inject({
+        method: 'GET',
+        url: '/v1/users/me/consents',
+        headers: auth,
+      });
+      expect(afterWithdraw.json().consents[0].state).toBe('withdrawn');
+      expect(afterWithdraw.json().consents[0].history).toHaveLength(2);
+
+      const reconsent = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'participation', version: 'v2.0' },
+      });
+      expect(reconsent.statusCode).toBe(201);
+      expect(reconsent.json().state).toBe('granted');
+
+      const final = await app.inject({
+        method: 'GET',
+        url: '/v1/users/me/consents',
+        headers: auth,
+      });
+      expect(final.json().consents[0].state).toBe('granted');
+      expect(final.json().consents[0].history).toHaveLength(3);
+      expect(final.json().consents[0].history.map((r: { state: string }) => r.state)).toEqual([
+        'granted',
+        'withdrawn',
+        'granted',
+      ]);
+
+      const consentEvents = eventBus.published.filter((e) => e.type === 'user.consent.changed');
+      expect(consentEvents.map((e) => (e.payload as { state: string }).state)).toEqual([
+        'granted',
+        'withdrawn',
+        'granted',
+      ]);
+      expect(JSON.stringify(consentEvents)).not.toContain('Abebe');
+    });
+
+    it('returns 409 granting an already-granted type and withdrawing an already-withdrawn one', async () => {
+      await bootConsents();
+      const { auth } = await registerAndAuth();
+      const first = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'media', version: 'v1.0' },
+      });
+      const id = first.json().id as string;
+
+      const duplicateGrant = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'media', version: 'v2.0' },
+      });
+      expect(duplicateGrant.statusCode).toBe(409);
+      expect(duplicateGrant.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+
+      const withdraw = await app.inject({
+        method: 'POST',
+        url: `/v1/users/me/consents/${id}/withdraw`,
+        headers: auth,
+      });
+      expect(withdraw.statusCode).toBe(200);
+
+      const doubleWithdraw = await app.inject({
+        method: 'POST',
+        url: `/v1/users/me/consents/${id}/withdraw`,
+        headers: auth,
+      });
+      expect(doubleWithdraw.statusCode).toBe(409);
+      expect(doubleWithdraw.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+    });
+
+    it("is self-scoped: cannot withdraw another user's consent (404)", async () => {
+      await bootConsents();
+      const { auth: authA } = await registerAndAuth(PHONE);
+      const { auth: authB } = await registerAndAuth('+251922222222');
+
+      const grantB = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: authB,
+        payload: { consent_type: 'research', version: 'v1.0' },
+      });
+      const idB = grantB.json().id as string;
+
+      const crossUserWithdraw = await app.inject({
+        method: 'POST',
+        url: `/v1/users/me/consents/${idB}/withdraw`,
+        headers: authA,
+      });
+      expect(crossUserWithdraw.statusCode).toBe(404);
+      expect(crossUserWithdraw.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents/00000000-0000-4000-8000-000000000000/withdraw',
+        headers: authA,
+      });
+      expect(unknown.statusCode).toBe(404);
+    });
+
+    it('returns 422 for invalid consent_type, version, and consent id', async () => {
+      await bootConsents();
+      const { auth } = await registerAndAuth();
+
+      const badType = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'crypto', version: 'v1.0' },
+      });
+      expect(badType.statusCode).toBe(422);
+      expect(badType.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+
+      const missingVersion = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents',
+        headers: auth,
+        payload: { consent_type: 'research' },
+      });
+      expect(missingVersion.statusCode).toBe(422);
+
+      const badId = await app.inject({
+        method: 'POST',
+        url: '/v1/users/me/consents/not-a-uuid/withdraw',
+        headers: auth,
+      });
+      expect(badId.statusCode).toBe(422);
+    });
+
+    it('returns 404 for a token subject with no durable user record', async () => {
+      await bootConsents();
+      const ghost = {
+        authorization: `Bearer ${signAccessToken('00000000-0000-4000-8000-000000000000')}`,
+      };
+      const get = await app.inject({ method: 'GET', url: '/v1/users/me/consents', headers: ghost });
+      expect(get.statusCode).toBe(404);
+    });
   });
 });

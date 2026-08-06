@@ -4,11 +4,13 @@ info:
   version: 0.1.0
   description: >-
     User & profile service contract (AR-003). Implements the SRS §12.3 User
-    Profile APIs for WP-017: father registration (FR-001/FR-002, UC-001),
-    profile CRUD (FR-002), pregnancy start capture routed to the pregnancy
-    engine contract (stubbed until WP-019; FR-006/FR-031), cohort/referral
-    tagging (FR-010), and preferences (FR-038). Emits `user.enrolled` and
-    `user.profile.updated` on the event bus.
+    Profile APIs for WP-017/WP-018: father registration (FR-001/FR-002,
+    UC-001), profile CRUD (FR-002), pregnancy start capture routed to the
+    pregnancy engine contract (stubbed until WP-019; FR-006/FR-031),
+    cohort/referral tagging (FR-010), preferences (FR-038), and the versioned
+    append-only consent lifecycle (FR-003/FR-004/FR-125/FR-117, AR-012). Emits
+    `user.enrolled`, `user.profile.updated`, and `user.consent.changed` on the
+    event bus.
 
     Identity is established by WP-016 authentication: every endpoint requires
     a Bearer access token, and all `me` endpoints bind to the token `sub`
@@ -246,6 +248,145 @@ paths:
                 $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
         '422':
           description: Invalid preference values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/me/consents:
+    get:
+      operationId: getUsersMeConsents
+      summary: View own consent records
+      description: >-
+        Returns the caller's consent lifecycle (SRS §12.3, FR-100/FR-125):
+        for each consent type (participation, research, media,
+        whatsapp_opt_in — independently revocable, FR-117) the current state,
+        version, and timestamps, plus the full immutable, versioned history
+        that serves as proof of consent (AR-012). The user id comes from the
+        Bearer token `sub` claim; a subject with no durable user record
+        returns 404.
+      tags: [users]
+      responses:
+        '200':
+          description: Current consent status and immutable history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentsPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+    post:
+      operationId: postUsersMeConsents
+      summary: Grant or re-consent to a consent type
+      description: >-
+        Records a new granted consent for the caller at a consent version
+        (FR-003/FR-125). Re-consent after withdrawal is allowed; granting a
+        type that is already in the granted state is rejected with 409
+        (single active grant per type, AR-012). The created record is
+        returned as the proof of consent. Emits `user.consent.changed`
+        (user_id, consent_type, version, state — no PII).
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentRequest'
+      responses:
+        '201':
+          description: The created granted consent record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentRecordPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No durable user record for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Consent type is already in the granted state (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid consent_type or version (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/users/me/consents/{id}/withdraw:
+    post:
+      operationId: postUsersMeConsentWithdraw
+      summary: Withdraw a consent
+      description: >-
+        Records a withdrawn event for the consent identified by `id`
+        (FR-004). Withdrawal is a new immutable row — the original grant is
+        never updated or deleted (AR-012), and the withdrawn record carries
+        the consent version it revokes. Already-withdrawn consents are
+        rejected with 409 (withdrawal idempotency). Emits
+        `user.consent.changed` (user_id, consent_type, version, state).
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The consent record id (uuid) being withdrawn.
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      responses:
+        '200':
+          description: The created withdrawn consent record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentRecordPayload'
+        '400':
+          description: Malformed consent id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Consent record not found for this subject (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Consent is already withdrawn (standard envelope).
           content:
             application/json:
               schema:
@@ -512,3 +653,98 @@ components:
                 postpartum,
                 general,
               ]
+
+    ConsentRequest:
+      type: object
+      required:
+        - consent_type
+        - version
+      additionalProperties: false
+      properties:
+        consent_type:
+          $ref: '#/components/schemas/ConsentType'
+        version:
+          type: string
+          description: Version of the consent statement the user accepted (FR-003/FR-125).
+          minLength: 1
+          maxLength: 100
+
+    ConsentRecordPayload:
+      type: object
+      required:
+        - id
+        - consent_type
+        - version
+        - state
+        - granted_at
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Immutable consent record id (uuid).
+        consent_type:
+          $ref: '#/components/schemas/ConsentType'
+        version:
+          type: string
+          description: Consent statement version carried by this record.
+        state:
+          $ref: '#/components/schemas/ConsentState'
+        granted_at:
+          type: string
+          format: date-time
+          description: When this record was recorded (UTC). A withdrawn row records the withdrawal time here.
+        withdrawn_at:
+          type: [string, 'null']
+          format: date-time
+          description: Set only on withdrawn records (UTC).
+
+    ConsentStatusPayload:
+      type: object
+      required:
+        - consent_type
+        - state
+        - history
+      additionalProperties: false
+      properties:
+        consent_type:
+          $ref: '#/components/schemas/ConsentType'
+        state:
+          $ref: '#/components/schemas/ConsentState'
+          description: Current state, derived from the most recent record for the type.
+        version:
+          type: [string, 'null']
+          description: Version of the most recent record.
+        granted_at:
+          type: [string, 'null']
+          format: date-time
+        withdrawn_at:
+          type: [string, 'null']
+          format: date-time
+        history:
+          type: array
+          description: Full immutable record stream, oldest first (proof of consent, AR-012).
+          items:
+            $ref: '#/components/schemas/ConsentRecordPayload'
+
+    ConsentsPayload:
+      type: object
+      required:
+        - consents
+      additionalProperties: false
+      properties:
+        consents:
+          type: array
+          description: One status entry per consent type that has at least one record.
+          items:
+            $ref: '#/components/schemas/ConsentStatusPayload'
+
+    ConsentType:
+      type: string
+      enum: [participation, research, media, whatsapp_opt_in]
+      description: Independently revocable consent type (FR-117).
+
+    ConsentState:
+      type: string
+      enum: [granted, withdrawn]
+      description: Append-only state; a type can hold at most one active grant (AR-012).

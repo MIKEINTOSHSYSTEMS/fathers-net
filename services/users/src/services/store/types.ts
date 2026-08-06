@@ -3,6 +3,35 @@ export interface QuietHours {
   end: string;
 }
 
+/** Independently revocable consent type (WP-018, FR-117). */
+export type ConsentType = 'participation' | 'research' | 'media' | 'whatsapp_opt_in';
+
+/** Append-only consent state (WP-018, AR-012). */
+export type ConsentState = 'granted' | 'withdrawn';
+
+export interface ConsentRecord {
+  /** Immutable record id (uuid). */
+  id: string;
+  userId: string;
+  consentType: ConsentType;
+  /** Consent statement version the record was recorded at (FR-003/FR-125). */
+  version: string;
+  state: ConsentState;
+  /** When this record was recorded (UTC). A withdrawn row records the withdrawal time. */
+  grantedAt: string;
+  /** Set only on withdrawn records. */
+  withdrawnAt: string | null;
+}
+
+export interface CreateConsentInput {
+  userId: string;
+  consentType: ConsentType;
+  version: string;
+  state: ConsentState;
+  grantedAt: string;
+  withdrawnAt: string | null;
+}
+
 export interface UserRecord {
   /** Durable UUID identity (FR-009). */
   id: string;
@@ -103,11 +132,14 @@ export interface PreferencesUpsertInput {
 }
 
 /**
- * Provider-agnostic users store (M-08). WP-017 persists the durable user
- * record on the baseline `users`/`profiles`/`pregnancies`/`user_preferences`
- * tables (migrations 002–004) via the Postgres adapter; the in-memory
- * test-double keeps unit/CI hermetic. Phone numbers are stored only as
- * ciphertext + keyed digest — the store never sees the plaintext phone.
+ * Provider-agnostic users store (M-08). WP-017/WP-018 persist the durable user
+ * record and the consent stream on the baseline `users`/`profiles`/
+ * `pregnancies`/`user_preferences`/`consents` tables (migrations 002–004) via
+ * the Postgres adapter; the in-memory test-double keeps unit/CI hermetic.
+ * Phone numbers are stored only as ciphertext + keyed digest — the store never
+ * sees the plaintext phone. `consents` is append-only (AR-012): `insertConsent`
+ * appends a new immutable row and the state guard (DB trigger / in-memory
+ * invariant) rejects any transition that would create a second active grant.
  */
 export interface UsersStore {
   findByPhoneDigest(digest: string): Promise<UserRecord | null>;
@@ -124,6 +156,15 @@ export interface UsersStore {
   upsertPregnancy(userId: string, input: PregnancyUpsertInput): Promise<PregnancyRecord>;
 
   upsertPreferences(userId: string, input: PreferencesUpsertInput): Promise<PreferencesRecord>;
+
+  /** All immutable consent records for the user, oldest first (WP-018). */
+  getConsents(userId: string): Promise<ConsentRecord[]>;
+
+  /** Single consent record scoped to the caller — null if absent or not owned. */
+  findConsentById(userId: string, id: string): Promise<ConsentRecord | null>;
+
+  /** Append a consent record; rejects transitions that violate AR-012. */
+  insertConsent(input: CreateConsentInput): Promise<ConsentRecord>;
 
   dispose(): Promise<void>;
 }

@@ -107,4 +107,156 @@ describe('memory users store (WP-017 test-double)', () => {
     await s.dispose();
     await expect(s.findById(user.id)).resolves.toBeNull();
   });
+
+  describe('consent stream (WP-018, AR-012)', () => {
+    const at = (ms: number) => new Date(ms).toISOString();
+
+    it('appends a granted consent and returns it scoped to the owner', async () => {
+      const s = store();
+      const user = await s.createUser(input());
+      const record = await s.insertConsent({
+        userId: user.id,
+        consentType: 'participation',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: at(1000),
+        withdrawnAt: null,
+      });
+
+      expect(record).toMatchObject({ userId: user.id, state: 'granted', withdrawnAt: null });
+      await expect(s.getConsents(user.id)).resolves.toHaveLength(1);
+      await expect(s.findConsentById(user.id, record.id)).resolves.toMatchObject({
+        consentType: 'participation',
+      });
+      // Self-scoping: the same record is invisible to another owner.
+      const other = await s.createUser({
+        ...input(),
+        phoneE164: 'cipher.2',
+        phoneE164Digest: 'digest-2',
+      });
+      await expect(s.findConsentById(other.id, record.id)).resolves.toBeNull();
+    });
+
+    it('enforces the state guard: first record must be a grant, states must alternate', async () => {
+      const s = store();
+      const user = await s.createUser(input());
+
+      await expect(
+        s.insertConsent({
+          userId: user.id,
+          consentType: 'research',
+          version: 'v1.0',
+          state: 'withdrawn',
+          grantedAt: at(1000),
+          withdrawnAt: at(1000),
+        }),
+      ).rejects.toThrow('first consent record for a type must be a grant');
+
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'research',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: at(1000),
+        withdrawnAt: null,
+      });
+
+      // A second active grant is rejected — no UPDATE/DELETE, only appends.
+      await expect(
+        s.insertConsent({
+          userId: user.id,
+          consentType: 'research',
+          version: 'v2.0',
+          state: 'granted',
+          grantedAt: at(2000),
+          withdrawnAt: null,
+        }),
+      ).rejects.toThrow('single active grant');
+      // Re-consent after withdrawal is allowed (FR-125).
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'research',
+        version: 'v1.0',
+        state: 'withdrawn',
+        grantedAt: at(2000),
+        withdrawnAt: at(2000),
+      });
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'research',
+        version: 'v2.0',
+        state: 'granted',
+        grantedAt: at(3000),
+        withdrawnAt: null,
+      });
+      await expect(s.getConsents(user.id)).resolves.toHaveLength(3);
+    });
+
+    it('mirrors the trigger invariants for withdrawn_at fields', async () => {
+      const s = store();
+      const user = await s.createUser(input());
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'media',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: at(1000),
+        withdrawnAt: null,
+      });
+      await expect(
+        s.insertConsent({
+          userId: user.id,
+          consentType: 'media',
+          version: 'v1.0',
+          state: 'withdrawn',
+          grantedAt: at(2000),
+          withdrawnAt: null,
+        }),
+      ).rejects.toThrow('withdrawn consent requires withdrawn_at');
+
+      // Withdraw properly so the next grant passes the same-state guard and
+      // reaches the withdrawn_at check (trigger checks state before fields).
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'media',
+        version: 'v1.0',
+        state: 'withdrawn',
+        grantedAt: at(2000),
+        withdrawnAt: at(2000),
+      });
+      await expect(
+        s.insertConsent({
+          userId: user.id,
+          consentType: 'media',
+          version: 'v1.0',
+          state: 'granted',
+          grantedAt: at(3000),
+          withdrawnAt: at(3000),
+        }),
+      ).rejects.toThrow('granted consent must not set withdrawn_at');
+    });
+
+    it('immutability: getConsents returns copies, so callers cannot mutate the stream', async () => {
+      const s = store();
+      const user = await s.createUser(input());
+      await s.insertConsent({
+        userId: user.id,
+        consentType: 'media',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: at(1000),
+        withdrawnAt: null,
+      });
+
+      const [first] = await s.getConsents(user.id);
+      first.state = 'withdrawn';
+      first.withdrawnAt = at(2000);
+      (first as unknown as Record<string, unknown>).extra = 'junk';
+
+      const [again] = await s.getConsents(user.id);
+      expect(again.state).toBe('granted');
+      expect(again.withdrawnAt).toBeNull();
+      expect(again).not.toHaveProperty('extra');
+    });
+  });
 });

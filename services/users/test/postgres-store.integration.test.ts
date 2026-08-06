@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import { ConflictError } from '@fathersnet/errors';
 import { createPostgresUsersStore } from '../src/services/store/postgres-store';
 import type { CreateUserInput } from '../src/services/store/types';
 
@@ -112,5 +114,119 @@ describeIntegration('users store Postgres adapter (baseline schema)', () => {
     expect(prefs?.quietHours).toEqual({ start: '22:00', end: '07:00' });
     expect(prefs?.notificationChannels).toEqual(['sms']);
     expect(prefs?.contentCategories).toEqual(['nutrition']);
+  });
+
+  describe('consent stream (WP-018, AR-012)', () => {
+    let userId: string;
+
+    beforeEach(async () => {
+      const user = await store.createUser(buildInput());
+      userId = user.id;
+    });
+
+    it('appends the immutable lifecycle: grant -> withdraw -> re-consent', async () => {
+      const granted = await store.insertConsent({
+        userId,
+        consentType: 'participation',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: new Date('2025-03-01T12:00:00Z').toISOString(),
+        withdrawnAt: null,
+      });
+      expect(granted).toMatchObject({ userId, consentType: 'participation', state: 'granted' });
+      expect(granted.withdrawnAt).toBeNull();
+
+      await expect(store.getConsents(userId)).resolves.toHaveLength(1);
+      await expect(store.findConsentById(userId, granted.id)).resolves.toMatchObject({
+        consentType: 'participation',
+      });
+      // Self-scoping: the record is invisible to another owner.
+      await expect(
+        store.findConsentById('00000000-0000-4000-8000-000000000000', granted.id),
+      ).resolves.toBeNull();
+
+      const withdrawn = await store.insertConsent({
+        userId,
+        consentType: 'participation',
+        version: 'v1.0',
+        state: 'withdrawn',
+        grantedAt: new Date('2025-03-01T12:00:02Z').toISOString(),
+        withdrawnAt: new Date('2025-03-01T12:00:02Z').toISOString(),
+      });
+      expect(withdrawn).toMatchObject({ state: 'withdrawn' });
+      expect(withdrawn.withdrawnAt).toBeTruthy();
+
+      await store.insertConsent({
+        userId,
+        consentType: 'participation',
+        version: 'v2.0',
+        state: 'granted',
+        grantedAt: new Date('2025-03-01T12:00:03Z').toISOString(),
+        withdrawnAt: null,
+      });
+
+      const consents = await store.getConsents(userId);
+      expect(consents).toHaveLength(3);
+      expect(consents.map((c) => c.state)).toEqual(['granted', 'withdrawn', 'granted']);
+      expect(consents.map((c) => c.version)).toEqual(['v1.0', 'v1.0', 'v2.0']);
+    });
+
+    it('rejects a duplicate grant as a ConflictError (single active grant)', async () => {
+      await store.insertConsent({
+        userId,
+        consentType: 'research',
+        version: 'v1.0',
+        state: 'granted',
+        grantedAt: new Date('2025-03-01T12:00:00Z').toISOString(),
+        withdrawnAt: null,
+      });
+      await expect(
+        store.insertConsent({
+          userId,
+          consentType: 'research',
+          version: 'v2.0',
+          state: 'granted',
+          grantedAt: new Date('2025-03-01T12:00:01Z').toISOString(),
+          withdrawnAt: null,
+        }),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it('rejects a first record that is not a grant', async () => {
+      await expect(
+        store.insertConsent({
+          userId,
+          consentType: 'media',
+          version: 'v1.0',
+          state: 'withdrawn',
+          grantedAt: new Date('2025-03-01T12:00:00Z').toISOString(),
+          withdrawnAt: new Date('2025-03-01T12:00:00Z').toISOString(),
+        }),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+  });
+
+  it('enforces the append-only trigger: consents rows cannot be updated or deleted', async () => {
+    const user = await store.createUser(buildInput());
+    const granted = await store.insertConsent({
+      userId: user.id,
+      consentType: 'participation',
+      version: 'v1.0',
+      state: 'granted',
+      grantedAt: new Date('2025-03-01T12:00:00Z').toISOString(),
+      withdrawnAt: null,
+    });
+    const pool = new Pool({ connectionString: TEST_DATABASE_URL });
+
+    try {
+      await expect(
+        pool.query(`UPDATE consents SET version = 'v9.9' WHERE id = $1`, [granted.id]),
+      ).rejects.toThrow(/append-only/);
+      await expect(pool.query(`DELETE FROM consents WHERE id = $1`, [granted.id])).rejects.toThrow(
+        /append-only/,
+      );
+    } finally {
+      await pool.end();
+    }
   });
 });
