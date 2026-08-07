@@ -216,9 +216,26 @@ services:
       FN_SCHEDULER_RETRY_BASE_MS: '500'
       FN_SCHEDULER_RETRY_MAX_MS: '5000'
       FN_SCHEDULER_RETRY_JITTER: '0.2'
+      # WP-021: the scheduler hosts the `reminders.dispatch` job, which
+      # self-configures from FN_REMINDERS_* env (no scheduler-config change,
+      # risk R3). The reminders job runs the Postgres store driver.
+      FN_STORE_DRIVER: postgres
+      FN_DATABASE_URL: postgres://fathersnet:${DB_PASSWORD:-local-dev-only}@postgres:5432/fathersnet
+      FN_REMINDERS_JWT_SECRET: ${FN_REMINDERS_JWT_SECRET}
+      FN_REMINDERS_DAILY_CAP: ${FN_REMINDERS_DAILY_CAP:-5}
+      FN_REMINDERS_TZ_OFFSET_MINUTES: ${FN_REMINDERS_TZ_OFFSET_MINUTES:-180}
+      FN_REMINDERS_QUIET_HOURS_ENABLED: ${FN_REMINDERS_QUIET_HOURS_ENABLED:-true}
+      FN_REMINDERS_QUIET_HOURS_START: ${FN_REMINDERS_QUIET_HOURS_START:-21:00}
+      FN_REMINDERS_QUIET_HOURS_END: ${FN_REMINDERS_QUIET_HOURS_END:-07:00}
+      FN_REMINDERS_EXPIRY_MINUTES: ${FN_REMINDERS_EXPIRY_MINUTES:-60}
+      FN_REMINDERS_JOB_INTERVAL_SECONDS: ${FN_REMINDERS_JOB_INTERVAL_SECONDS:-60}
+      FN_REMINDERS_DISPATCH_BATCH_LIMIT: ${FN_REMINDERS_DISPATCH_BATCH_LIMIT:-100}
+      FN_REMINDERS_MAX_WEEK: ${FN_REMINDERS_MAX_WEEK:-45}
     ports:
       - '3400:3400'
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -226,6 +243,51 @@ services:
         [
           'CMD-SHELL',
           'node -e "fetch(\"http://127.0.0.1:3400/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  reminders:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/reminders/Dockerfile
+    environment:
+      ENV: ${ENV:-dev}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FN_PORT: '3500'
+      FN_HOST: 0.0.0.0
+      FN_SERVICE_NAME: reminders
+      FN_STORE_DRIVER: postgres
+      FN_DATABASE_URL: postgres://fathersnet:${DB_PASSWORD:-local-dev-only}@postgres:5432/fathersnet
+      FN_REDIS_URL: redis://redis:6379
+      FN_REMINDERS_JWT_SECRET: ${FN_REMINDERS_JWT_SECRET}
+      FN_REMINDERS_ISSUER: ${FN_REMINDERS_ISSUER:-fathersnet}
+      FN_REMINDERS_AUDIENCE: ${FN_REMINDERS_AUDIENCE:-fathersnet-api}
+      FN_REMINDERS_DAILY_CAP: ${FN_REMINDERS_DAILY_CAP:-5}
+      FN_REMINDERS_TZ_OFFSET_MINUTES: ${FN_REMINDERS_TZ_OFFSET_MINUTES:-180}
+      FN_REMINDERS_QUIET_HOURS_ENABLED: ${FN_REMINDERS_QUIET_HOURS_ENABLED:-true}
+      FN_REMINDERS_QUIET_HOURS_START: ${FN_REMINDERS_QUIET_HOURS_START:-21:00}
+      FN_REMINDERS_QUIET_HOURS_END: ${FN_REMINDERS_QUIET_HOURS_END:-07:00}
+      FN_REMINDERS_EXPIRY_MINUTES: ${FN_REMINDERS_EXPIRY_MINUTES:-60}
+      FN_REMINDERS_JOB_INTERVAL_SECONDS: ${FN_REMINDERS_JOB_INTERVAL_SECONDS:-60}
+      FN_REMINDERS_DISPATCH_BATCH_LIMIT: ${FN_REMINDERS_DISPATCH_BATCH_LIMIT:-100}
+      FN_REMINDERS_MAX_WEEK: ${FN_REMINDERS_MAX_WEEK:-45}
+    ports:
+      - '3500:3500'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3500/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 10s
       timeout: 3s

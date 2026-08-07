@@ -1,4 +1,5 @@
 import { createLogger } from '@fathersnet/logger';
+import { createRemindersJobs } from '@fathersnet/reminders';
 
 import { buildSchedulerApp } from './app';
 import { loadSchedulerConfig } from './config';
@@ -13,7 +14,13 @@ const logger = createLogger({
 
 async function main(): Promise<void> {
   const app = await buildSchedulerApp({ config, logger });
-  const runtime = createSchedulerRuntime({ config, logger });
+  const runtime = createSchedulerRuntime({
+    config,
+    logger,
+    // WP-021: the reminder dispatch job self-configures from FN_REMINDERS_*
+    // env; the scheduler host needs no new scheduler-config keys (R3).
+    jobs: createRemindersJobs({ logger }),
+  });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info('app.shutdown', 'shutting down', { signal });

@@ -1,9 +1,9 @@
 # =============================================================================
-# FathersNet scheduler service image (WP-024b)
+# FathersNet reminders service image (WP-021)
 #
 # Strategy: npm workspaces monorepo — builds the whole workspace in a builder
 # stage (needed for @fathersnet/* inter-package resolution), then copies ONLY
-# the artifacts the scheduler service needs into a slim, non-root runtime stage.
+# the artifacts the reminders service needs into a slim, non-root runtime stage.
 # UID/GID 1001 per implementation-plan/12 §2.3 (non-root hardening).
 # =============================================================================
 
@@ -17,21 +17,19 @@ COPY package.json package-lock.json .npmrc tsconfig.base.json turbo.json ./
 COPY packages/config packages/config
 COPY packages/errors packages/errors
 COPY packages/events packages/events
-COPY packages/idempotency packages/idempotency
 COPY packages/logger packages/logger
 COPY services/reminders services/reminders
-COPY services/scheduler services/scheduler
 
 RUN npm ci
 
-# Build workspace dependencies first, then the scheduler service.
-RUN npx turbo run build --filter=@fathersnet/scheduler^... && npx turbo run build --filter=@fathersnet/scheduler
+# Build workspace dependencies first, then the reminders service.
+RUN npx turbo run build --filter=@fathersnet/reminders^... && npx turbo run build --filter=@fathersnet/reminders
 
 # --- Runtime -------------------------------------------------------------
 FROM node:20-alpine AS runtime
 
 ENV NODE_ENV=production
-ENV FN_PORT=3400
+ENV FN_PORT=3500
 ENV FN_HOST=0.0.0.0
 
 WORKDIR /app
@@ -45,14 +43,12 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/services/reminders/package.json ./services/reminders/package.json
 COPY --from=builder /app/services/reminders/dist ./services/reminders/dist
-COPY --from=builder /app/services/scheduler/package.json ./services/scheduler/package.json
-COPY --from=builder /app/services/scheduler/dist ./services/scheduler/dist
 
 USER nodeapp
 
-EXPOSE 3400
+EXPOSE 3500
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3400/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" || exit 1
+  CMD node -e "fetch('http://127.0.0.1:3500/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" || exit 1
 
-CMD ["node", "services/scheduler/dist/index.js"]
+CMD ["node", "services/reminders/dist/index.js"]

@@ -1,0 +1,436 @@
+openapi: 3.1.0
+info:
+  title: FathersNet Reminders Service Internal Contract
+  version: 0.1.0
+  description: >-
+    Reminders service internal contract (AR-003, WP-021 §4) — service-internal
+    only, never exposed through the gateway `/v1/`. Implements the reminder
+    engine foundation: template library + materialized instances
+    (FR-041…FR-048), lead-time scheduling (FR-043), quiet hours with per-user
+    and per-template config (FR-029/FR-043), critical-priority bypass
+    (FR-046), one-time/recurring templates (FR-044), EN/AM rendering (FR-047),
+    append-only dispatch/ack log with per-user daily cap (06 §4.14, FR-045),
+    and run-id binding against duplicate scheduler runs (FR-163).
+
+    The engine publishes `reminder.due` (producer `reminder-engine`) after a
+    successful dispatch+ack. Channel delivery is simulated by the Phase-2 stub
+    dispatcher (R8) — no delivery is claimed; real providers land with Phase 4.
+
+    The `schedule` leg of the WP-021 evidence flow is `POST
+    /internal/reminders/instances` (body `templateCode`, `userId`, `dueAt`,
+    optional `priority`); `dueAt` is the event/appointment time from which the
+    template's lead time is subtracted to derive the instance due time.
+
+    Ownership: every endpoint enforces the cross-cutting control (02 §5) from
+    the Bearer access JWT — a non-staff caller may only act on their own
+    `userId` (their token `sub`); `staff` is the Phase-2 RBAC boundary for
+    cross-user access. Request and response field names are camelCase per the
+    approved WP-021 contract.
+  contact:
+    name: FathersNet Engineering
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:3500
+    description: Local development reminders service (internal, never via gateway).
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Process liveness for compose/orchestrator healthchecks (no auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: >-
+        Readiness: verifies the store round-trip (Postgres `SELECT 1`), so a
+        container is only marked ready once the data layer is reachable (no
+        auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Store is not reachable (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /internal/reminders/instances:
+    post:
+      operationId: postReminderInstance
+      summary: Schedule a reminder instance
+      description: >-
+        Schedules one materialized reminder instance for a user. `dueAt` is the
+        event/appointment time (ISO 8601); the template's `lead_time_minutes`
+        is subtracted to derive the instance due time (FR-043). The template's
+        channel/priority are denormalized onto the instance so later template
+        edits never affect in-flight instances; an explicit `priority` override
+        may escalate (critical bypasses quiet hours, FR-046). The caller must
+        own `userId` (or be staff). Recurring templates materialize one
+        instance per call — weekly expansion (FR-044) is a future
+        event-driven flow.
+      tags: [reminders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleInstanceRequest'
+      responses:
+        '201':
+          description: The scheduled instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancePayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller does not own userId and is not staff (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Template code not found (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values or inactive template (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /internal/reminders/instances/{id}:
+    get:
+      operationId: getReminderInstance
+      summary: Get a reminder instance
+      description: >-
+        Returns one instance's current state (status lifecycle, dispatch/ack
+        timestamps, last error). The caller must own the instance's `userId`
+        (or be staff); unknown or non-owned ids are 404 so resource existence
+        is not disclosed.
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Instance id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The instance state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancePayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Instance not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /internal/reminders/dispatches:
+    get:
+      operationId: getReminderDispatches
+      summary: List dispatch/ack log
+      description: >-
+        Lists dispatch rows newest-first (FR-045), optionally filtered to one
+        user. A non-staff caller lists only their own log (the `userId` query
+        must match their token `sub`); staff may list any user or omit the
+        filter. Pagination per 06 §3.3 (`limit` 1–100, default 20; `offset`
+        default 0).
+      tags: [reminders]
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          description: Only rows for this user (staff may omit to list all).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of rows to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          description: Number of rows to skip (page offset).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Dispatch/ack rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchListPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Caller may not list another user's log (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid query parameters (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+    Channel:
+      type: string
+      enum: [whatsapp]
+      description: Outbound channel. WhatsApp is the only Phase-2 channel (FR-045).
+
+    Priority:
+      type: string
+      enum: [normal, critical]
+      description: >-
+        Instance/template priority. `critical` bypasses the quiet-hours window
+        (FR-046).
+
+    InstanceStatus:
+      type: string
+      enum: [scheduled, dispatched, skipped_quiet_hours, rate_limited, failed, expired]
+      description: Materialized instance lifecycle (migration 018 CHECK).
+
+    DispatchStatus:
+      type: string
+      enum: [dispatched, acked, failed]
+      description: Append-only dispatch/ack log lifecycle (migration 018 CHECK).
+
+    HealthzPayload:
+      type: object
+      required: [status, service, env, version]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        env:
+          type: string
+        version:
+          type: string
+
+    ReadyzPayload:
+      type: object
+      required: [status, driver]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        driver:
+          type: string
+          enum: [memory, postgres]
+
+    ScheduleInstanceRequest:
+      type: object
+      required: [templateCode, userId, dueAt]
+      additionalProperties: false
+      properties:
+        templateCode:
+          type: string
+          description: Template library code (e.g. `anc_visit_t1`, FR-044).
+          minLength: 1
+          maxLength: 100
+        userId:
+          $ref: '#/components/schemas/Uuid'
+        dueAt:
+          type: string
+          format: date-time
+          description: >-
+            Event/appointment time (ISO 8601); the template's lead time is
+            subtracted to derive the instance due time (FR-043).
+        priority:
+          $ref: '#/components/schemas/Priority'
+          description: Optional override of the template's priority (FR-046).
+
+    InstancePayload:
+      type: object
+      required:
+        - id
+        - templateId
+        - userId
+        - dueAt
+        - status
+        - priority
+        - channel
+        - createdAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        templateId:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+        dueAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/InstanceStatus'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        channel:
+          $ref: '#/components/schemas/Channel'
+        dedupeKey:
+          type: [string, 'null']
+          description: FR-048 cross-channel dedup key (null in the foundation phase).
+        dispatchedAt:
+          type: [string, 'null']
+          format: date-time
+        acknowledgedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          type: [string, 'null']
+          description: Last failure reason (fail-closed path).
+        createdAt:
+          type: string
+          format: date-time
+
+    DispatchPayload:
+      type: object
+      required:
+        - id
+        - instanceId
+        - userId
+        - runId
+        - channel
+        - priority
+        - status
+        - dispatchedAt
+        - createdAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        instanceId:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+        runId:
+          type: string
+          description: Scheduler run-id binding; UNIQUE(instance_id, run_id) guards re-runs (FR-163).
+        channel:
+          $ref: '#/components/schemas/Channel'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        status:
+          $ref: '#/components/schemas/DispatchStatus'
+        dispatchedAt:
+          type: string
+          format: date-time
+        ackReceivedAt:
+          type: [string, 'null']
+          format: date-time
+        ackPayload:
+          type: [object, 'null']
+          description: Provider ack record (e.g. provider_ref, simulated flag).
+        lastError:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    DispatchListPayload:
+      type: object
+      required: [dispatches]
+      additionalProperties: false
+      properties:
+        dispatches:
+          type: array
+          description: Dispatch/ack rows, newest first (FR-045).
+          items:
+            $ref: '#/components/schemas/DispatchPayload'

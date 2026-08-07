@@ -1,11 +1,11 @@
 {
-  "name": "@fathersnet/scheduler",
+  "name": "@fathersnet/reminders",
   "version": "0.1.0",
   "private": true,
-  "description": "FathersNet scheduler service — leader election, job registry, worker execution framework, retry/DLQ, run-id binding (WP-024b)",
+  "description": "FathersNet reminder engine service — template processing, quiet-hours/priority/cap handling, lead-time + recurrence scheduling, store adapters, dispatcher stub, scheduler job factory (WP-021)",
   "license": "MIT",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/library.js",
+  "types": "dist/library.d.ts",
   "files": [
     "dist"
   ],
@@ -23,13 +23,15 @@
   "dependencies": {
     "@fathersnet/config": "*",
     "@fathersnet/errors": "*",
-    "@fathersnet/idempotency": "*",
+    "@fathersnet/events": "*",
     "@fathersnet/logger": "*",
-    "@fathersnet/reminders": "*",
     "fastify": "5.11.2",
-    "ioredis": "5.4.1"
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.13.1"
   },
   "devDependencies": {
-    "@fathersnet/test-utils": "*"
+    "@fathersnet/test-utils": "*",
+    "@types/jsonwebtoken": "9.0.7",
+    "@types/pg": "8.11.10"
   }
 }
