@@ -22,6 +22,7 @@ const MIGRATION_NAMES = [
   '004-consents-and-preferences',
   '011-content',
   '018-reminders',
+  '019-journal',
 ];
 
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -39,7 +40,7 @@ async function rows(client: Client, sql: string, params: unknown[] = []) {
   return result.rows;
 }
 
-describeMigrate('database migration baseline (001-004)', () => {
+describeMigrate('database migration baseline (001-019)', () => {
   beforeAll(async () => {
     await runMigrations({ databaseUrl: DATABASE_URL as string });
   });
@@ -658,6 +659,149 @@ describeMigrate('database migration baseline (001-004)', () => {
     });
   });
 
+  it('creates journal tables with domain checks, timeline index and cascade FK', async () => {
+    await withClient(async (client) => {
+      const entryColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'journal_entries' ORDER BY ordinal_position`,
+      );
+      expect(entryColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'user_id',
+        'entry_type',
+        'content',
+        'pregnancy_week',
+        'shared_with_partner',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const entryChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'journal_entries'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      const eChecks = entryChecks.map((r) => r.conname);
+      expect(eChecks.some((n) => n.includes('entry_type'))).toBe(true);
+      expect(eChecks.some((n) => n.includes('pregnancy_week'))).toBe(true);
+
+      const entryIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'journal_entries' ORDER BY indexname`,
+      );
+      const eIndexes = entryIndexes.map((r) => r.indexname).filter((n) => !n.endsWith('_pkey'));
+      expect(eIndexes).toEqual(['idx_journal_entries_user_created']);
+      expect(
+        entryIndexes.find((r) => r.indexname === 'idx_journal_entries_user_created').indexdef,
+      ).toContain('(user_id, created_at DESC)');
+
+      const mediaColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'journal_media' ORDER BY ordinal_position`,
+      );
+      expect(mediaColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'journal_entry_id',
+        'media_type',
+        'storage_path',
+        'size_bytes',
+        'transcript',
+        'transcript_status',
+        'created_at',
+      ]);
+
+      const mediaChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'journal_media'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      const mChecks = mediaChecks.map((r) => r.conname);
+      expect(mChecks.some((n) => n.includes('media_type'))).toBe(true);
+      expect(mChecks.some((n) => n.includes('transcript_status'))).toBe(true);
+
+      const mediaIndexes = await rows(
+        client,
+        `SELECT indexname FROM pg_indexes WHERE tablename = 'journal_media' ORDER BY indexname`,
+      );
+      expect(mediaIndexes.map((r) => r.indexname).filter((n) => !n.endsWith('_pkey'))).toEqual([
+        'idx_journal_media_entry',
+      ]);
+    });
+  });
+
+  it('enforces journal privacy default, domain checks and erasure cascade', async () => {
+    await withClient(async (client) => {
+      const user = await client.query(
+        `INSERT INTO users (phone_e164, phone_e164_digest) VALUES ('cipher-j', 'digest-j') RETURNING id`,
+      );
+      const userId = (user.rows[0] as { id: string }).id;
+
+      const created = await client.query(
+        `INSERT INTO journal_entries (user_id, content, pregnancy_week)
+         VALUES ($1, 'Today the baby kicked.', 24) RETURNING id, shared_with_partner`,
+        [userId],
+      );
+      const entryId = (created.rows[0] as { id: string; shared_with_partner: boolean }).id;
+      expect((created.rows[0] as { shared_with_partner: boolean }).shared_with_partner).toBe(false);
+
+      await expect(
+        client.query(
+          `INSERT INTO journal_entries (user_id, entry_type, content)
+           VALUES ($1, 'bogus', 'x')`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO journal_entries (user_id, content, pregnancy_week)
+           VALUES ($1, 'x', 0)`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO journal_entries (user_id, content, pregnancy_week)
+           VALUES ($1, 'x', 46)`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await client.query(
+        `INSERT INTO journal_media (journal_entry_id, media_type, storage_path, size_bytes)
+         VALUES ($1, 'photo', 'a/b/c', 1000)`,
+        [entryId],
+      );
+
+      await expect(
+        client.query(
+          `INSERT INTO journal_media (journal_entry_id, media_type, storage_path)
+           VALUES ($1, 'bogus', 'a/b/c')`,
+          [entryId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO journal_media (journal_entry_id, media_type, storage_path, transcript_status)
+           VALUES ($1, 'photo', 'a/b/c', 'bogus')`,
+          [entryId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+      const orphans = await client.query(
+        `SELECT (SELECT count(*) FROM journal_entries WHERE user_id = $1) +
+                (SELECT count(*) FROM journal_media WHERE journal_entry_id = $2) AS total`,
+        [userId, entryId],
+      );
+      expect(Number(orphans.rows[0].total)).toBe(0);
+    });
+  });
+
   it('applies the cascade and SET NULL delete policy', async () => {
     await withClient(async (client) => {
       const owner = await client.query(
@@ -725,7 +869,7 @@ describeMigrate('database migration baseline (001-004)', () => {
       const tables = await rows(
         client,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches')`,
+         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches','journal_entries','journal_media')`,
       );
       expect(tables).toHaveLength(0);
     });

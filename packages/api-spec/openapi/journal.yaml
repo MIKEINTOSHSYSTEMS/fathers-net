@@ -3,10 +3,32 @@ info:
   title: FathersNet Journal Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the offline journal service contract (AR-003). Planned
-    resources (implementation-plan/06 Phase B): encrypted journal entries with
-    offline sync (FR-…). Contracts are defined here BEFORE implementation; paths
-    land with the corresponding work package.
+    Journal service contract (AR-003, WP-022, SRS §12.9) — service-internal
+    definition of the journal API surface. Implements the Phase-2 journal
+    foundation: private-by-default text entries with owner-only writes
+    (FR-051/FR-052/FR-126), opt-in partner sharing resolved through the journey
+    link (FR-039), a newest-first cursor-paginated timeline (SRS §13.4), and a
+    synchronous schema-versioned JSON export (FR-057/FR-128).
+
+    Ownership is enforced from the Bearer access JWT `sub` claim (cross-cutting
+    control, 02 §5) — the caller identity NEVER comes from the request body.
+    Privacy-by-default (FR-052): a non-owned entry is 404, never 403, so
+    existence is never disclosed; a partner may read only entries explicitly
+    shared (`shared_with_partner = true`) AND linked via
+    `pregnancies.partner_user_id`.
+
+    The service publishes `journal.entry.created` (producer `journal-service`)
+    with a no-PII payload — journal content is never emitted on the bus
+    (FR-022/FR-123).
+
+    Media entries are spec-reserved (AR-023): `POST /v1/journal/media` returns
+    501 until the Phase-4 object-storage work package (WP-060). The gateway
+    aggregation of these routes is a separate work package; this file is the
+    single source of truth for the journal surface.
+
+    Request and response field names follow the approved WP-022 contract
+    (camelCase in responses, snake_case on the journal-specific write fields
+    `pregnancy_week` / `shared_with_partner`, mirroring the content contract).
   contact:
     name: FathersNet Engineering
   license:
@@ -14,15 +36,577 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3700
+    description: Local development journal service (internal, gateway wiring is a later WP).
 
 security:
   - bearerAuth: []
 
-paths: {}
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Process liveness for compose/orchestrator healthchecks (no auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: >-
+        Readiness: verifies the store round-trip (`SELECT 1` for Postgres), so a
+        container is only marked ready once the data layer is reachable (no
+        auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Store is not reachable (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/journal/entries:
+    get:
+      operationId: getJournalEntries
+      summary: List the caller's journal timeline
+      description: >-
+        Returns the caller's own entries, newest first, cursor paginated
+        (SRS §13.4). Owner-only — other users' entries never appear. A
+        malformed cursor falls back to the first page. `total` is always null:
+        keyset pagination does not compute a total count.
+      tags: [journal]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries to return (1–100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque continuation token from a previous page's `next_cursor`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+      responses:
+        '200':
+          description: A page of the caller's entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryListPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid query parameters (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+    post:
+      operationId: postJournalEntry
+      summary: Create a journal entry
+      description: >-
+        Creates a text journal entry owned by the token `sub`. Private by
+        default (FR-052) unless `shared_with_partner` is set. Publishes
+        `journal.entry.created` best-effort with a no-PII payload.
+      tags: [journal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJournalEntryRequest'
+      responses:
+        '201':
+          description: The created entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Rate limited (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/journal/entries/{id}:
+    get:
+      operationId: getJournalEntry
+      summary: Get one journal entry
+      description: >-
+        Returns an entry the caller owns or that was explicitly shared with
+        them via the journey partner link (FR-039). Non-owned or unshared ids
+        are 404 so existence is never disclosed (FR-052/FR-126).
+      tags: [journal]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found, not owned, or not shared with the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+    patch:
+      operationId: patchJournalEntry
+      summary: Update a journal entry
+      description: >-
+        Merges fields onto an entry the caller owns. Owner-only: non-owned ids
+        are 404. `content` is trimmed and must remain non-empty;
+        `shared_with_partner` toggles the opt-in share (FR-039).
+      tags: [journal]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateJournalEntryRequest'
+      responses:
+        '200':
+          description: The updated entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+    delete:
+      operationId: deleteJournalEntry
+      summary: Delete a journal entry
+      description: >-
+        Deletes an entry the caller owns (FR-128 erasure path). Owner-only:
+        non-owned ids are 404. Returns 204 with no body.
+      tags: [journal]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: Entry deleted.
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/journal/entries/{id}/share:
+    post:
+      operationId: shareJournalEntry
+      summary: Share an entry with the partner
+      description: >-
+        Explicit opt-in shortcut (FR-039) setting `shared_with_partner = true`.
+        Owner-only: non-owned ids are 404. A later WP wires the reverse
+        (`shared_with_partner = false` is available via PATCH).
+      tags: [journal]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The updated (shared) entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalEntryPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/journal/export:
+    get:
+      operationId: getJournalExport
+      summary: Export the caller's journal as a JSON artifact
+      description: >-
+        Synchronous, schema-versioned JSON export of the caller's OWN entries in
+        chronological order (FR-057/FR-128). Self-scoped — other users' shared
+        entries never appear, and no internal ids beyond the entry id are
+        included. Deterministic given the same rows.
+      tags: [journal]
+      responses:
+        '200':
+          description: The export artifact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalExportArtifact'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '5XX':
+          description: Upstream error (standard envelope, sanitized).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/journal/media:
+    post:
+      operationId: postJournalMedia
+      summary: Upload a media entry (reserved)
+      description: >-
+        Spec-reserved for Phase 4 (AR-023, WP-060). Deliberately returns 501 —
+        never a silent stub — until the object-storage + signed-upload work
+        package lands.
+      tags: [journal]
+      responses:
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '501':
+          description: >-
+            Not implemented (standard envelope, code NOT_IMPLEMENTED). This
+            endpoint intentionally has no success path until WP-060 — the
+            absent 2XX response is the contract's way of stating the resource
+            does not accept uploads yet.
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+    HealthzPayload:
+      type: object
+      required: [status, service, env, version]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        env:
+          type: string
+        version:
+          type: string
+
+    ReadyzPayload:
+      type: object
+      required: [status, driver]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        driver:
+          type: string
+          enum: [memory, postgres]
+
+    CreateJournalEntryRequest:
+      type: object
+      required: [content]
+      additionalProperties: false
+      properties:
+        content:
+          type: string
+          description: Plain-text journal content.
+          minLength: 1
+          maxLength: 10000
+        pregnancy_week:
+          type: [integer, 'null']
+          description: Pregnancy week the entry refers to (1–45), if any.
+          minimum: 1
+          maximum: 45
+        shared_with_partner:
+          type: boolean
+          default: false
+          description: Opt-in partner sharing (FR-039). Off by default (FR-052).
+
+    UpdateJournalEntryRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        pregnancy_week:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 45
+        shared_with_partner:
+          type: boolean
+
+    JournalEntryPayload:
+      type: object
+      required:
+        - id
+        - userId
+        - entryType
+        - content
+        - pregnancyWeek
+        - sharedWithPartner
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+          description: Owning user (the token `sub` at creation time).
+        entryType:
+          type: string
+          enum: [text]
+          description: Only `text` in this phase; media is reserved (AR-023).
+        content:
+          type: string
+        pregnancyWeek:
+          type: [integer, 'null']
+        sharedWithPartner:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    JournalEntryListPayload:
+      type: object
+      required: [items, next_cursor, total]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: The caller's entries, newest first.
+          items:
+            $ref: '#/components/schemas/JournalEntryPayload'
+        next_cursor:
+          type: [string, 'null']
+          description: >-
+            Opaque continuation token for the next page; null when no more
+            entries exist.
+        total:
+          type: [integer, 'null']
+          description: Always null — keyset pagination does not compute totals.
+
+    JournalExportArtifact:
+      type: object
+      required:
+        - schema_version
+        - schema_url
+        - exported_at
+        - entry_count
+        - entries
+      additionalProperties: false
+      properties:
+        schema_version:
+          type: integer
+          description: Export artifact schema version (1).
+        schema_url:
+          type: string
+          format: uri
+          description: Canonical JSON schema for this artifact version.
+        exported_at:
+          type: string
+          format: date-time
+        entry_count:
+          type: integer
+          description: Number of entries in this artifact.
+        entries:
+          type: array
+          description: The caller's own entries, oldest first (chronological).
+          items:
+            $ref: '#/components/schemas/JournalExportEntry'
+
+    JournalExportEntry:
+      type: object
+      required:
+        - id
+        - entry_type
+        - content
+        - pregnancy_week
+        - shared_with_partner
+        - created_at
+        - updated_at
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        entry_type:
+          type: string
+          enum: [text]
+        content:
+          type: string
+        pregnancy_week:
+          type: [integer, 'null']
+        shared_with_partner:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
