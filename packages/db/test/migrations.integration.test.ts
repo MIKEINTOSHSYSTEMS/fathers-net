@@ -21,6 +21,7 @@ const MIGRATION_NAMES = [
   '003-pregnancies-and-babies',
   '004-consents-and-preferences',
   '011-content',
+  '018-reminders',
 ];
 
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -452,6 +453,211 @@ describeMigrate('database migration baseline (001-004)', () => {
     });
   });
 
+  it('creates reminder tables with domain checks, uniques and indexes', async () => {
+    await withClient(async (client) => {
+      const templateColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'reminder_templates' ORDER BY ordinal_position`,
+      );
+      expect(templateColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'code',
+        'channel',
+        'priority',
+        'title_en',
+        'title_am',
+        'body_en',
+        'body_am',
+        'lead_time_minutes',
+        'quiet_hours',
+        'recurrence',
+        'pregnancy_week',
+        'active',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const templateChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'reminder_templates'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      const tChecks = templateChecks.map((r) => r.conname);
+      expect(tChecks.some((n) => n.includes('channel'))).toBe(true);
+      expect(tChecks.some((n) => n.includes('priority'))).toBe(true);
+      expect(tChecks.some((n) => n.includes('pregnancy_week'))).toBe(true);
+
+      const templateIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'reminder_templates' ORDER BY indexname`,
+      );
+      expect(templateIndexes.map((r) => r.indexname).filter((n) => !n.endsWith('_pkey'))).toEqual([
+        'uq_reminder_templates_code',
+      ]);
+      expect(
+        templateIndexes.find((r) => r.indexname === 'uq_reminder_templates_code').indexdef,
+      ).toContain('UNIQUE');
+
+      const instanceColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'reminder_instances' ORDER BY ordinal_position`,
+      );
+      expect(instanceColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'template_id',
+        'user_id',
+        'due_at',
+        'status',
+        'priority',
+        'channel',
+        'dedupe_key',
+        'dispatched_at',
+        'acknowledged_at',
+        'last_error',
+        'created_at',
+      ]);
+
+      const instanceIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'reminder_instances' ORDER BY indexname`,
+      );
+      expect(
+        instanceIndexes
+          .map((r) => r.indexname)
+          .filter((n) => !n.endsWith('_pkey'))
+          .sort(),
+      ).toEqual([
+        'idx_reminder_instances_due',
+        'idx_reminder_instances_user',
+        'uq_reminder_instances_dedupe',
+      ]);
+      expect(
+        instanceIndexes.find((r) => r.indexname === 'uq_reminder_instances_dedupe').indexdef,
+      ).toMatch(/WHERE .*dedupe_key IS NOT NULL/i);
+
+      const dispatchColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'reminder_dispatches' ORDER BY ordinal_position`,
+      );
+      expect(dispatchColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'instance_id',
+        'user_id',
+        'run_id',
+        'channel',
+        'priority',
+        'status',
+        'dispatched_at',
+        'ack_received_at',
+        'ack_payload',
+        'last_error',
+        'created_at',
+      ]);
+
+      const dispatchIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'reminder_dispatches' ORDER BY indexname`,
+      );
+      expect(
+        dispatchIndexes
+          .map((r) => r.indexname)
+          .filter((n) => !n.endsWith('_pkey'))
+          .sort(),
+      ).toEqual(['idx_reminder_dispatches_user_day', 'uq_reminder_dispatches_instance_run']);
+      expect(
+        dispatchIndexes.find((r) => r.indexname === 'uq_reminder_dispatches_instance_run').indexdef,
+      ).toContain('UNIQUE');
+    });
+  });
+
+  it('enforces reminder FK, unique and duplicate-run idempotency rules', async () => {
+    await withClient(async (client) => {
+      const user = await client.query(
+        `INSERT INTO users (phone_e164, phone_e164_digest) VALUES ('cipher-r1', 'digest-r1') RETURNING id`,
+      );
+      const userId = (user.rows[0] as { id: string }).id;
+
+      const tpl = await client.query(
+        `INSERT INTO reminder_templates (code, channel, title_en, title_am, body_en, body_am)
+         VALUES ('anc_visit_t1', 'whatsapp', 'ANC visit', 'የኤኤንሲ ጉብኝት', 'Attend your appointment.', 'ቀጠሮዎን ይከታተሉ።') RETURNING id`,
+      );
+      const tplId = (tpl.rows[0] as { id: string }).id;
+
+      await expect(
+        client.query(
+          `INSERT INTO reminder_templates (code, channel, title_en, body_en) VALUES ('no-am', 'whatsapp', 'T', 'B')`,
+        ),
+      ).rejects.toThrow(/null|check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO reminder_templates (code, channel, title_en, title_am, body_en, body_am, priority)
+           VALUES ('bad-p', 'whatsapp', 'T', 'T', 'B', 'B', 'urgent')`,
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO reminder_templates (code, channel, title_en, title_am, body_en, body_am)
+           VALUES ('anc_visit_t1', 'whatsapp', 'T', 'T', 'B', 'B')`,
+        ),
+      ).rejects.toThrow(/duplicate key|unique/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO reminder_templates (code, channel, title_en, title_am, body_en, body_am, pregnancy_week)
+           VALUES ('bad-week', 'whatsapp', 'T', 'T', 'B', 'B', 50)`,
+        ),
+      ).rejects.toThrow(/check/i);
+
+      const inst = await client.query(
+        `INSERT INTO reminder_instances (template_id, user_id, due_at, channel, priority)
+         VALUES ($1, $2, now() + interval '1 day', 'whatsapp', 'normal') RETURNING id`,
+        [tplId, userId],
+      );
+      const instanceId = (inst.rows[0] as { id: string }).id;
+
+      await client.query(`UPDATE reminder_instances SET dedupe_key = 'dup-1' WHERE id = $1`, [
+        instanceId,
+      ]);
+      await expect(
+        client.query(
+          `INSERT INTO reminder_instances (template_id, user_id, due_at, channel, priority, dedupe_key)
+           VALUES ($1, $2, now() + interval '2 days', 'whatsapp', 'normal', 'dup-1')`,
+          [tplId, userId],
+        ),
+      ).rejects.toThrow(/duplicate key|unique/i);
+
+      await client.query(
+        `INSERT INTO reminder_dispatches (instance_id, user_id, run_id, channel, priority)
+         VALUES ($1, $2, 'run-1', 'whatsapp', 'normal')`,
+        [instanceId, userId],
+      );
+      await expect(
+        client.query(
+          `INSERT INTO reminder_dispatches (instance_id, user_id, run_id, channel, priority)
+           VALUES ($1, $2, 'run-1', 'whatsapp', 'normal')`,
+          [instanceId, userId],
+        ),
+      ).rejects.toThrow(/duplicate key|unique/i);
+
+      await expect(
+        client.query(`DELETE FROM reminder_templates WHERE id = $1`, [tplId]),
+      ).rejects.toThrow(/foreign key/);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+      const orphanCount = await client.query(
+        `SELECT (SELECT count(*) FROM reminder_instances WHERE user_id = $1) +
+                (SELECT count(*) FROM reminder_dispatches WHERE user_id = $1) AS total`,
+        [userId],
+      );
+      expect(Number(orphanCount.rows[0].total)).toBe(0);
+    });
+  });
+
   it('applies the cascade and SET NULL delete policy', async () => {
     await withClient(async (client) => {
       const owner = await client.query(
@@ -519,7 +725,7 @@ describeMigrate('database migration baseline (001-004)', () => {
       const tables = await rows(
         client,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions')`,
+         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches')`,
       );
       expect(tables).toHaveLength(0);
     });
