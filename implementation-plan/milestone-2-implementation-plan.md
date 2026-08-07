@@ -154,6 +154,7 @@ Each WP below records: objective, tasks, files, tests, and the **verification ev
 - **Tests:** SoD test green; workflow E2E; archive removes from search + emits retirement event; localization parity check fails on missing Amharic body; contract green.
 - **Evidence:** CMS workflow E2E test report; SoD test; EN/AM parity test; coverage ≥80% core.
 - **Requirements:** FR-076…085, FR-106, AR-015.
+- **Interpretation decision (2026-08-07):** §12.5 lists approve and publish as separate actions but provides no separate `/publish` endpoint. WP-020 implements the §12.5 surface exactly: `POST /v1/content/:id/approve` performs the approve→publish transition in one step (`pending_medical_review → approved → published`), sets `medical_reviewed=true`, records the reviewer on the latest version snapshot, and emits `content.published` once per language. No `/publish` route exists in WP-020 — added only if a later requirement authorizes it. **Deviation:** `packages/i18n/` (EN/AM scaffolding) is not created — the migration-011 EN/AM fields (`title_en`/`body_en`/`title_am`/`body_am`) serve as the localization store and parity source (FR-079); i18n scaffolding is deferred until a UI consumer needs it.
 
 ### 5.9 WP-022 — Journal service
 
