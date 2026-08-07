@@ -195,6 +195,43 @@ services:
       retries: 3
       start_period: 5s
 
+  scheduler:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/scheduler/Dockerfile
+    environment:
+      ENV: ${ENV:-dev}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FN_PORT: '3400'
+      FN_HOST: 0.0.0.0
+      FN_SERVICE_NAME: scheduler
+      FN_SCHEDULER_DRIVER: redis
+      FN_REDIS_URL: redis://redis:6379
+      FN_SCHEDULER_LEADER_LEASE_MS: '10000'
+      FN_SCHEDULER_TICK_MS: '1000'
+      FN_SCHEDULER_RUN_TTL_SECONDS: '900'
+      FN_SCHEDULER_RETRY_ATTEMPTS: '3'
+      FN_SCHEDULER_RETRY_BASE_MS: '500'
+      FN_SCHEDULER_RETRY_MAX_MS: '5000'
+      FN_SCHEDULER_RETRY_JITTER: '0.2'
+    ports:
+      - '3400:3400'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3400/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   nginx:
     <<: *common
     image: nginx:1.27-alpine
