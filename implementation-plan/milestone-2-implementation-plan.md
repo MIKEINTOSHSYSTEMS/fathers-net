@@ -32,6 +32,7 @@ This document is the **execution plan for Milestone 2 (Phase 2 — Backend Core)
 | M-07 (budget cap) | **Approved/Closed (2026-08-08, Option B)** — `FN_BUDGET_CAP = 0` (unset; no per-user reference amount); `decision-log.md` §1.4; see §10 item 2 |
 | G1-05 STRIDE / G1-06 DPIA | **Approved by Project Owner** (draft evidence preserved) |
 | `develop` branch | **Created + pushed 2026-08-05** from `main` (`7cb9a06`) per §9 — closes the unmet `repository-bootstrap-order.md` completion criterion |
+| M2 exit verification (criterion 1 — UC-001/QR-004 Journey-1 E2E) | **BLOCKED 2026-08-08** — M2 exit verification (Step 13) performed: criteria 2–6 PASS, criterion 1 BLOCKED (no Journey-1 E2E evidence). Governance conflict resolved by decision **M-09 (OPTION A)** (`decision-log.md` §1.5): a minimal Phase-2 Journey-1 verification is authorized as the M2 acceptance artifact only. **Exit criteria unchanged.** WP-091/WP-097 retain the broader QR-004/§17.4 E2E program; WP-025 / Phase 3 **NOT authorized**; a **separate implementation authorization is required** before creating the E2E test/harness; M2 remains BLOCKED until the Journey-1 evidence is produced and verified |
 
 **Boundary rule:** execution lands through the governed PR path (§9). WP-015…WP-024 proceed one work package at a time; each WP ends with an implementation report and waits for a separate authorization before the next begins.
 
