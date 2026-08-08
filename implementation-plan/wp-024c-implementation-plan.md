@@ -2,7 +2,7 @@
 
 **Document:** WP-024c execution plan (planning only — no code, no migrations, no schema changes, no catalog/D-log changes).
 **Date:** 2026-08-08
-**Status:** **PLANNING AUTHORIZATION: GRANTED — PLAN CREATION ONLY.** Planning artifact only. **MIGRATION 021 AUTHORIZATION: NOT GRANTED.** **WP-024c IMPLEMENTATION AUTHORIZATION: NOT GRANTED.** Migration 021 creation requires separate authorization. WP-024c implementation requires separate authorization after plan approval and migration/governance gates are satisfied.
+**Status:** **IMPLEMENTATION COMPLETED 2026-08-08** — WP-024c implementation committed `d640a576e20d64821481786e7240ad10c7332da1` (`feat(wp-024c): implement transactional outbox`) and pushed to `origin/develop`; **WP-024c → Closed** (evidence `wp-024c-progress-report.md`, `implementation-status.md` §7/§9). **M2 exit verification (milestone-2 §4 Step 13) not yet performed; WP-025 / Phase 3 not started.** Prior steps (historical): **PLANNING AUTHORIZATION: GRANTED 2026-08-08** (planning only); **MIGRATION 021 AUTHORIZATION: GRANTED 2026-08-08** (`021-outbox.ts` created, unchanged since — committed blob hash `6aaedd29…29ed2`); **GOVERNANCE/SCHEMA AUTHORIZATION: GRANTED 2026-08-08** (catalog row 019 appended to `05` §4.2, D-11 recorded in `decision-log.md`, committed exactly as authorized); **IMPLEMENTATION AUTHORIZATION: GRANTED 2026-08-08**; **COMMIT + PUSH AUTHORIZATIONS: GRANTED 2026-08-08** (direct-to-develop precedent; PR structurally not applicable).
 **Controlling references:** `milestone-2-implementation-plan.md` §5.3 (WP-024) and §2 boundary rule; §10 item 8 (beyond-catalog requires `05` §4.2 row + schema approval + decision-log entry); §11 (one WP at a time, separate authorization per step); `06-backend-development-plan.md` §2.2 (per-service outbox + event table); `03-system-architecture-plan.md` §4.6 (D-03 — domain rows + outbox rows in one DB transaction); `packages/events/src/outbox.ts` (canonical `OUTBOX_TABLE_DDL`, `PostgresOutboxReader`, `OutboxRelay`); `implementation-status.md` line 163 (WP-024 remainder = "service adoption, outbox migration per approved schema"); `17-final-execution-roadmap.md` line 124 (prompt/pulse/legacy jobs = WP-037); `18-implementation-verification-plan.md` §2.1 (Produced → Passed → Signed).
 
 ---
@@ -185,12 +185,13 @@ The WP-024c implementation report (delivered at the end of the WP, per milestone
 - [x] Governance approved for documentation: catalog row 019 + D-11 (PO + DB Architect).
 - [x] Scope approved: IN users/content/reminders/journal; OUT auth/checklists; no vocabulary; no scheduler jobs (PO).
 - [x] Approval-sequence ratification approved (PO).
-- [ ] **Migration 021 authorization — NOT GRANTED (separate future gate: PO + DB Architect).**
-- [ ] **WP-024c implementation authorization — NOT GRANTED (separate future gate: PO).**
-- [ ] Governance/schema step (append catalog row 019 + write D-11) — separate gate, not performed.
+- [x] **Migration 021 authorization GRANTED (2026-08-08, PO + DB Architect)** — `021-outbox.ts` created (committed blob hash `6aaedd29…29ed2`, unchanged).
+- [x] **Governance/schema step COMPLETED (2026-08-08)** — catalog row 019 appended to `05` §4.2; D-11 written to `decision-log.md`; committed exactly as authorized.
+- [x] **WP-024c implementation authorization GRANTED (2026-08-08, PO)** — implemented; committed `d640a57` + pushed to `origin/develop` (direct-to-develop precedent; no PR).
+- [x] **WP-024c CLOSED 2026-08-08** — evidence `wp-024c-progress-report.md`, `implementation-status.md` §7/§9.
 
-**PLANNING AUTHORIZATION: GRANTED — PLAN CREATION ONLY.**
+**IMPLEMENTATION COMPLETED 2026-08-08** (commit `d640a576e20d64821481786e7240ad10c7332da1` + push to `origin/develop`; **WP-024c → Closed**).
 
-**MIGRATION 021 AUTHORIZATION: NOT GRANTED.**
+**M2 EXIT VERIFICATION NOT YET PERFORMED** (milestone-2 §4 Step 13; does not block WP-024c closure).
 
-**WP-024c IMPLEMENTATION AUTHORIZATION: NOT GRANTED.**
+**WP-025 / PHASE 3 NOT STARTED** (awaits separate authorization).
