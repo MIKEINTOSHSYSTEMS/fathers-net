@@ -80,6 +80,20 @@ export interface ContentTransition {
   medicalReviewed?: boolean;
 }
 
+/** One row for the `content_outbox` table (021-outbox, WP-024c). Written in
+ *  the same DB transaction as the domain mutation that produced the event. */
+export interface OutboxEntry {
+  eventId: string;
+  eventType: string;
+  producer: string;
+  schemaVersion: number;
+  occurredAt: string;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  idempotencyKey: string | null;
+  payload: Record<string, unknown>;
+}
+
 /**
  * Provider-agnostic content store (M-08). WP-020 persists the content library
  * on the migration-011 tables (`content`, `content_versions`) via the Postgres
@@ -87,7 +101,9 @@ export interface ContentTransition {
  * `status` CHECK validates the value set; legal transitions are enforced by the
  * service (workflow) layer, and the guarded `transition` upsert is the
  * concurrency control. `create` inserts the content row plus its version-1
- * snapshot atomically.
+ * snapshot atomically. `transition` also persists any caller-supplied outbox
+ * rows in the same transaction (WP-024c: `content.published` /
+ * `content.retired` are committed with the status change they describe).
  */
 export interface ContentStore {
   /** Atomically insert the content row (status=draft) plus version 1. */
@@ -99,8 +115,9 @@ export interface ContentStore {
   updateContent(id: string, patch: ContentUpdateInput): Promise<ContentRecord>;
 
   /** Optimistic status transition; throws ConflictError when `status` is not
-   *  in `from` (concurrent guard on top of the service-level check). */
-  transition(id: string, change: ContentTransition): Promise<ContentRecord>;
+   *  in `from` (concurrent guard on top of the service-level check). Writes
+   *  the supplied outbox rows in the same transaction (WP-024c). */
+  transition(id: string, change: ContentTransition, outbox?: OutboxEntry[]): Promise<ContentRecord>;
 
   /** Published items only, newest first — retrieval eligibility (FR-078, AR-015). */
   listPublished(query: ContentListQuery): Promise<ContentRecord[]>;

@@ -13,6 +13,7 @@ import { createReminderService, type ReminderService } from './engine/reminder-s
 import { createStubDispatcher, type ChannelDispatcher } from './services/dispatcher';
 import { createTokenVerifier, type TokenVerifier } from './services/tokens';
 import { createRedisClient } from './services/redis';
+import { createRemindersRelay, type RemindersRelay } from './services/relay';
 
 export interface RemindersAppOptions {
   config: RemindersConfig;
@@ -83,12 +84,26 @@ export async function buildRemindersApp(options: RemindersAppOptions): Promise<F
     createReminderService({
       store,
       dispatcher: options.dispatcher ?? createStubDispatcher(logger),
-      bus: eventBus,
       logger,
       config,
     });
 
+  // Outbox relay (WP-024c, D-03): `ackDispatch` writes `reminder_outbox` rows
+  // in the same DB transaction as each ack; the relay publishes committed rows
+  // to the bus and marks them published. Only wired on the real Postgres store
+  // (never with an injected test store).
+  let relayHandle: RemindersRelay | null = null;
+  if (usePostgres && !options.store) {
+    relayHandle = createRemindersRelay({
+      bus: eventBus,
+      logger,
+      connectionString: config.FN_DATABASE_URL,
+    });
+    await relayHandle.start();
+  }
+
   app.addHook('onClose', async () => {
+    await relayHandle?.stop();
     await reminderService.dispose();
     await eventBus.dispose();
     await redisClient?.quit();

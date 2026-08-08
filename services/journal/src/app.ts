@@ -12,6 +12,7 @@ import { createJournalStore, type JournalStore } from './store';
 import { JournalService } from './services/journal-service';
 import { createTokenVerifier, type TokenVerifier } from './services/tokens';
 import { createRedisClient } from './services/redis';
+import { createJournalRelay, type JournalRelay } from './services/relay';
 
 export interface JournalAppOptions {
   config: JournalConfig;
@@ -73,10 +74,25 @@ export async function buildJournalApp(options: JournalAppOptions): Promise<Fasti
       config.FN_JOURNAL_AUDIENCE,
     );
 
-  const journalService = new JournalService({ store, eventBus, logger });
+  const journalService = new JournalService({ store, logger });
   const deps: EntryRouteDeps = { journalService };
 
+  // Outbox relay (WP-024c, D-03): `store.create` writes `journal_outbox` rows
+  // in the same DB transaction as each entry INSERT; the relay publishes
+  // committed rows to the bus and marks them published. Only wired on the real
+  // Postgres store (never with an injected test store).
+  let relayHandle: JournalRelay | null = null;
+  if (usePostgres && !options.store) {
+    relayHandle = createJournalRelay({
+      bus: eventBus,
+      logger,
+      connectionString: config.FN_DATABASE_URL,
+    });
+    await relayHandle.start();
+  }
+
   app.addHook('onClose', async () => {
+    await relayHandle?.stop();
     await store.dispose();
     await eventBus.dispose();
     await redisClient?.quit();

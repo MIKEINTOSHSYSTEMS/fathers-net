@@ -27,6 +27,10 @@ export interface JournalEntry {
 }
 
 export interface CreateJournalEntryInput {
+  /** Durable id. Optional: the service supplies it so the `journal.entry.created`
+   *  outbox row can reference the entry in the same transaction (D-03); the
+   *  Postgres adapter falls back to `gen_random_uuid()`. */
+  id?: string;
   userId: string;
   entryType: EntryType;
   content: string;
@@ -54,10 +58,32 @@ export interface JournalEntryList {
   nextCursor: string | null;
 }
 
+/**
+ * Write-side outbox row (WP-024c, D-03): the canonical 16-column `021-outbox`
+ * contract minus the DB-defaulted columns (`id`, `status`, `attempts`,
+ * `available_at`, `created_at`, `published_at`, `last_error`). The relay
+ * reconstructs the wire event envelope from the committed row, so these fields
+ * must survive verbatim. The canonical contract carries no `request_id`;
+ * request correlation stops at the service boundary for outbox-published
+ * events (approved in wp-024c §9).
+ */
+export interface OutboxEntry {
+  eventId: string;
+  eventType: string;
+  producer: string;
+  schemaVersion: number;
+  occurredAt: string;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+}
+
 export interface JournalStore {
   /** Create an entry. `entryType` is caller-controlled at the store layer but
-   *  the WP-022 service always passes `text` (Phase 2 scope). */
-  create(input: CreateJournalEntryInput): Promise<JournalEntry>;
+   *  the WP-022 service always passes `text` (Phase 2 scope). `outbox` rows are
+   *  appended inside the SAME DB transaction as the entry INSERT (D-03). */
+  create(input: CreateJournalEntryInput, outbox?: OutboxEntry[]): Promise<JournalEntry>;
 
   /** Privacy gate (FR-052/FR-126): owner, or explicitly-shared linked partner.
    *  Returns null for any other caller — the 404-invisibility contract. */

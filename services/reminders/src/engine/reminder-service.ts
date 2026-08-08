@@ -1,10 +1,9 @@
 import { NotFoundError, ValidationError } from '@fathersnet/errors';
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import type { RemindersConfig } from '../config';
 import type { ChannelDispatcher } from '../services/dispatcher';
-import { publishEvent } from '../services/events';
-import type { ReminderDispatch, ReminderInstance, ReminderStore } from '../store';
+import { buildOutboxEntry } from '../services/events';
+import type { OutboxEntry, ReminderDispatch, ReminderInstance, ReminderStore } from '../store';
 import type { CreateReminderTemplateInput, ReminderTemplate } from '../types';
 import { dayWindow } from './cap';
 import { applyLeadTime } from './lead-time';
@@ -27,7 +26,6 @@ export type ReminderServiceConfig = Pick<
 export interface ReminderServiceOptions {
   store: ReminderStore;
   dispatcher: ChannelDispatcher;
-  bus: EventBus;
   logger?: Logger;
   config: ReminderServiceConfig;
   /** Injectable clock (hermetic tests). Defaults to `new Date()`. */
@@ -67,8 +65,12 @@ export interface DispatchCycleResult {
  *   2. select due instances (`status='scheduled' AND due_at <= now`)
  *   3. per instance: quiet-hours gate (FR-029/FR-043/FR-046) → render (FR-047)
  *      → atomic claim + cap + dispatch-log insert (FR-163, 06 §4.14)
- *      → channel send (stub) → ack → best-effort `reminder.due`
+ *      → channel send (stub) → ack → `reminder.due` (outbox, WP-024c)
  *
+ * WP-024c: `reminder.due` is no longer published best-effort after the ack.
+ * The outbox entry joins the `ackDispatch` store transaction (D-03) — its
+ * payload carries `providerRef`/`simulated`, which only exist after the
+ * channel send — and the relay publishes the committed row to the bus.
  * Everything on the hot path is a store call; the pure engine modules
  * (`template-engine`, `quiet-hours`, `cap`, `lead-time`, `priority`) hold the
  * decision math so it is unit-testable without I/O.
@@ -80,7 +82,6 @@ export function createReminderService(options: ReminderServiceOptions): Reminder
 export class ReminderService {
   readonly #store: ReminderStore;
   readonly #dispatcher: ChannelDispatcher;
-  readonly #bus: EventBus;
   readonly #logger?: Logger;
   readonly #config: ReminderServiceConfig;
   readonly #now: () => Date;
@@ -88,7 +89,6 @@ export class ReminderService {
   constructor(options: ReminderServiceOptions) {
     this.#store = options.store;
     this.#dispatcher = options.dispatcher;
-    this.#bus = options.bus;
     this.#logger = options.logger;
     this.#config = options.config;
     this.#now = options.now ?? (() => new Date());
@@ -282,6 +282,7 @@ export class ReminderService {
       dispatch.id,
       { providerRef: send.providerRef, simulated: send.simulated },
       nowIso,
+      [this.#dueEntry(instance, dispatch.id, template.code, runId, language, send)],
     );
     if (!acked) {
       this.#logger?.warn('reminders.ack_missing', 'dispatch already terminal', {
@@ -289,18 +290,29 @@ export class ReminderService {
       });
     }
 
-    await publishEvent({
-      bus: this.#bus,
-      logger: this.#logger,
+    outcomes.dispatched += 1;
+  }
+
+  /** `reminder.due` outbox row (WP-024c). Persisted atomically with the ack —
+   *  the relay publishes it on commit, so a send is never acknowledged without
+   *  its event and a rolled-back ack produces no event. */
+  #dueEntry(
+    instance: ReminderInstance,
+    dispatchId: string,
+    templateCode: string,
+    runId: string,
+    language: 'en' | 'am',
+    send: { providerRef: string; simulated: boolean },
+  ): OutboxEntry {
+    return buildOutboxEntry({
       type: 'reminder.due',
-      requestId: runId,
       aggregate: { type: 'reminder_instance', id: instance.id },
-      idempotencyKey: dispatch.id,
+      idempotencyKey: dispatchId,
       payload: {
         instanceId: instance.id,
-        dispatchId: dispatch.id,
+        dispatchId,
         userId: instance.userId,
-        templateCode: template.code,
+        templateCode,
         runId,
         channel: instance.channel,
         priority: instance.priority,
@@ -309,8 +321,6 @@ export class ReminderService {
         simulated: send.simulated,
       },
     });
-
-    outcomes.dispatched += 1;
   }
 
   /** Quiet-hours gate (FR-029/FR-043/FR-046). `critical` bypasses the window;

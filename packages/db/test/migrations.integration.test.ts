@@ -24,6 +24,7 @@ const MIGRATION_NAMES = [
   '018-reminders',
   '019-journal',
   '020-checklist-budget',
+  '021-outbox',
 ];
 
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -41,7 +42,7 @@ async function rows(client: Client, sql: string, params: unknown[] = []) {
   return result.rows;
 }
 
-describeMigrate('database migration baseline (001-020)', () => {
+describeMigrate('database migration baseline (001-021)', () => {
   beforeAll(async () => {
     await runMigrations({ databaseUrl: DATABASE_URL as string });
   });
@@ -1053,6 +1054,109 @@ describeMigrate('database migration baseline (001-020)', () => {
     });
   });
 
+  it('creates the four per-service outbox tables with the canonical pending index (021-outbox, WP-024c)', async () => {
+    await withClient(async (client) => {
+      const tableNames = ['user_outbox', 'content_outbox', 'reminder_outbox', 'journal_outbox'];
+
+      for (const tableName of tableNames) {
+        const columns = await rows(
+          client,
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_name = $1 ORDER BY ordinal_position`,
+          [tableName],
+        );
+        expect(columns.map((r) => r.column_name)).toEqual([
+          'id',
+          'event_id',
+          'event_type',
+          'producer',
+          'schema_version',
+          'occurred_at',
+          'aggregate_type',
+          'aggregate_id',
+          'idempotency_key',
+          'payload',
+          'status',
+          'attempts',
+          'available_at',
+          'created_at',
+          'published_at',
+          'last_error',
+        ]);
+
+        const indexes = await rows(
+          client,
+          `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = $1 ORDER BY indexname`,
+          [tableName],
+        );
+        const pending = indexes.find((r) => r.indexname === `idx_${tableName}_pending`);
+        expect(pending?.indexdef).toContain('status');
+        expect(pending?.indexdef).toContain("'pending'");
+        expect(pending?.indexdef).toContain("'failed'");
+        // No FKs, no triggers, no unique constraints, no extra indexes.
+        expect(indexes.map((r) => r.indexname).filter((n) => !n.endsWith('_pkey'))).toEqual([
+          `idx_${tableName}_pending`,
+        ]);
+        const fks = await rows(
+          client,
+          `SELECT conname FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'f'`,
+          [tableName],
+        );
+        expect(fks).toHaveLength(0);
+        const triggers = await rows(
+          client,
+          `SELECT tgname FROM pg_trigger WHERE tgrelid = $1::regclass AND NOT tgisinternal`,
+          [tableName],
+        );
+        expect(triggers).toHaveLength(0);
+      }
+    });
+  });
+
+  it('inserts rows into every outbox table with DB defaults and enforces the status CHECK (021-outbox, WP-024c)', async () => {
+    await withClient(async (client) => {
+      for (const tableName of [
+        'user_outbox',
+        'content_outbox',
+        'reminder_outbox',
+        'journal_outbox',
+      ]) {
+        const inserted = await client.query(
+          `INSERT INTO ${tableName} (event_id, event_type, producer, idempotency_key, payload)
+           VALUES (gen_random_uuid(), 'test.event', 'test-service', $1, '{"k":"v"}')
+           RETURNING id, status, attempts, available_at, created_at, published_at, last_error`,
+          [`idem-${tableName}`],
+        );
+        const row = inserted.rows[0];
+        expect(row.id).toMatch(/^[0-9a-f-]{36}$/i); // gen_random_uuid default
+        expect(row.status).toBe('pending');
+        expect(Number(row.attempts)).toBe(0);
+        expect(row.available_at).toBeInstanceOf(Date);
+        expect(row.created_at).toBeInstanceOf(Date);
+        expect(row.published_at).toBeNull();
+        expect(row.last_error).toBeNull();
+
+        // Partial-index eligibility: a failed row with available_at in the past
+        // is read by the relay's pending/failed selector.
+        await client.query(
+          `UPDATE ${tableName} SET status = 'failed', attempts = 1, available_at = now() - interval '10 minutes'
+           WHERE id = $1`,
+          [row.id],
+        );
+
+        // status CHECK accepts all four states.
+        for (const status of ['pending', 'published', 'failed', 'dead']) {
+          await client.query(`UPDATE ${tableName} SET status = $1 WHERE id = $2`, [status, row.id]);
+        }
+        await expect(
+          client.query(`UPDATE ${tableName} SET status = 'bogus' WHERE id = $1`, [row.id]),
+        ).rejects.toThrow(/check/i);
+
+        await client.query(`DELETE FROM ${tableName} WHERE id = $1`, [row.id]);
+      }
+    });
+  });
+
   it('rolls back all migrations cleanly and re-applies them', async () => {
     await runMigrations({
       databaseUrl: DATABASE_URL as string,
@@ -1064,7 +1168,7 @@ describeMigrate('database migration baseline (001-020)', () => {
       const tables = await rows(
         client,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches','journal_entries','journal_media','checklists','checklist_items','budget_entries')`,
+         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches','journal_entries','journal_media','checklists','checklist_items','budget_entries','user_outbox','content_outbox','reminder_outbox','journal_outbox')`,
       );
       expect(tables).toHaveLength(0);
     });

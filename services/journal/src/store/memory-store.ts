@@ -7,6 +7,7 @@ import type {
   JournalEntry,
   JournalEntryList,
   JournalStore,
+  OutboxEntry,
   UpdateJournalEntryInput,
 } from './types';
 
@@ -23,11 +24,16 @@ export interface MemoryJournalStore extends JournalStore {
   /** Test/seed helper standing in for `pregnancies.partner_user_id`:
    *  registers `partnerId` as the linked partner of `ownerId`. */
   setPartner(ownerId: string, partnerId: string): void;
+  /** WP-024c outbox capture surface: every outbox entry passed to a
+   *  published-write store call is appended so unit tests can assert what the
+   *  relay would publish. `dispose()` clears it. */
+  outboxLog: OutboxEntry[];
 }
 
 export function createMemoryJournalStore(): MemoryJournalStore {
   const entries = new Map<string, JournalEntry>();
   const partnerOf = new Map<string, string>();
+  const outboxLog: OutboxEntry[] = [];
 
   // Monotonic clock: `new Date().toISOString()` only has millisecond
   // resolution, so tight create loops would collide and break the
@@ -79,11 +85,15 @@ export function createMemoryJournalStore(): MemoryJournalStore {
 
   return {
     setPartner,
+    outboxLog,
 
-    async create(input: CreateJournalEntryInput): Promise<JournalEntry> {
+    async create(
+      input: CreateJournalEntryInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<JournalEntry> {
       const now = nextIso();
       const entry: JournalEntry = {
-        id: randomUUID(),
+        id: input.id ?? randomUUID(),
         userId: input.userId,
         entryType: input.entryType,
         content: input.content,
@@ -93,6 +103,7 @@ export function createMemoryJournalStore(): MemoryJournalStore {
         updatedAt: now,
       };
       entries.set(entry.id, entry);
+      outboxLog.push(...outbox);
       return { ...entry };
     },
 
@@ -174,6 +185,7 @@ export function createMemoryJournalStore(): MemoryJournalStore {
     async dispose(): Promise<void> {
       entries.clear();
       partnerOf.clear();
+      outboxLog.length = 0;
     },
   };
 }

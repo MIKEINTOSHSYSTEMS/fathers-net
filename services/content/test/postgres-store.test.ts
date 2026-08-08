@@ -192,6 +192,7 @@ describe('content store Postgres adapter (SQL generation, hermetic)', () => {
 
   it('transitions status with the guarded WHERE clause', async () => {
     const store = createPostgresContentStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
     fake.responses.push({ rows: [{ ...CONTENT_ROW, status: 'pending_medical_review' }] });
     const submitted = await store.transition(CONTENT_ROW.id, {
       from: ['draft'],
@@ -199,14 +200,17 @@ describe('content store Postgres adapter (SQL generation, hermetic)', () => {
     });
     expect(submitted.status).toBe('pending_medical_review');
 
-    const call = fake.calls[0];
+    expect(fake.calls[0].text).toBe('BEGIN');
+    const call = fake.calls[1];
     expect(call.text).toContain('SET status = $2,');
     expect(call.text).toContain('WHERE id = $1 AND status = ANY($4::text[])');
     expect(call.values).toEqual([CONTENT_ROW.id, 'pending_medical_review', false, ['draft']]);
+    expect(fake.calls.map((c) => c.text)).toContain('COMMIT');
   });
 
   it('clears medical_reviewed on approve transitions', async () => {
     const store = createPostgresContentStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
     fake.responses.push({
       rows: [{ ...CONTENT_ROW, status: 'published', medical_reviewed: true }],
     });
@@ -216,7 +220,7 @@ describe('content store Postgres adapter (SQL generation, hermetic)', () => {
       medicalReviewed: true,
     });
     expect(published).toMatchObject({ status: 'published', medicalReviewed: true });
-    expect(fake.calls[0].values).toEqual([
+    expect(fake.calls[1].values).toEqual([
       CONTENT_ROW.id,
       'published',
       true,
@@ -359,5 +363,69 @@ describe('content store Postgres adapter (SQL generation, hermetic)', () => {
     const store = createPostgresContentStore('postgres://test');
     await store.dispose();
     expect(fake.ended).toBe(true);
+  });
+});
+
+describe('content store outbox transactional write (WP-024c, D-03)', () => {
+  let fake: FakePg;
+
+  const ENTRY = {
+    eventId: 'e-1',
+    eventType: 'content.published',
+    producer: 'content-service',
+    schemaVersion: 1,
+    occurredAt: '2025-03-01T12:00:00.000Z',
+    aggregateType: 'content',
+    aggregateId: CONTENT_ROW.id,
+    idempotencyKey: `${CONTENT_ROW.id}:1`,
+    payload: { content_id: CONTENT_ROW.id, version: 1, language: 'en' },
+  };
+
+  beforeEach(() => {
+    fake = new FakePg();
+    (Pool as unknown as jest.Mock).mockImplementation(() => fake);
+  });
+
+  it('writes the outbox rows inside the same transaction as the transition', async () => {
+    const store = createPostgresContentStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({
+      rows: [{ ...CONTENT_ROW, status: 'published', medical_reviewed: true }],
+    });
+    const published = await store.transition(
+      CONTENT_ROW.id,
+      { from: ['pending_medical_review'], to: 'published', medicalReviewed: true },
+      [ENTRY, { ...ENTRY, payload: { content_id: CONTENT_ROW.id, version: 1, language: 'am' } }],
+    );
+    expect(published.status).toBe('published');
+
+    const texts = fake.calls.map((c) => c.text);
+    const outboxIdx = texts.findIndex((t) => t.includes('INSERT INTO content_outbox'));
+    expect(outboxIdx).toBeGreaterThan(1);
+    expect(texts.indexOf('COMMIT')).toBeGreaterThan(outboxIdx);
+    expect(texts[0]).toBe('BEGIN');
+
+    expect(fake.calls[outboxIdx].values).toEqual([
+      'e-1',
+      'content.published',
+      'content-service',
+      1,
+      '2025-03-01T12:00:00.000Z',
+      'content',
+      CONTENT_ROW.id,
+      `${CONTENT_ROW.id}:1`,
+      JSON.stringify({ content_id: CONTENT_ROW.id, version: 1, language: 'en' }),
+    ]);
+    expect(fake.calls[outboxIdx + 1].values?.[1]).toBe('content.published');
+  });
+
+  it('rolls back the outbox write when the guarded transition matches no row', async () => {
+    const store = createPostgresContentStore('postgres://test');
+    await expect(
+      store.transition(CONTENT_ROW.id, { from: ['draft'], to: 'pending_medical_review' }, [ENTRY]),
+    ).rejects.toBeInstanceOf(ConflictError);
+    const texts = fake.calls.map((c) => c.text);
+    expect(texts).toContain('ROLLBACK');
+    expect(texts.filter((t) => t.includes('INSERT INTO content_outbox'))).toHaveLength(0);
   });
 });

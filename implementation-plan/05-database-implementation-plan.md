@@ -383,6 +383,7 @@ Migrations are numbered, atomic (wrapped in a transaction where PostgreSQL allow
 | 016 | `research-schema` | `research_users`, `research_responses`, `research_analytics` + grants | 001, (data from 006/007/013 via pipeline) | Anonymized research tables (AR-013, §10.1.3) |
 | 017 | `seed-data` | prompts (weekly/daily/legacy from §7.3.3/7.3.4/7.3.5), hospital-bag checklist defaults (§8.2), budget categories, retention-policy configuration | 005, 009, 010 | Reference/config seed (FR-014, FR-086) |
 | 018 | `reminders` | `reminder_templates`, `reminder_instances`, `reminder_dispatches` | 002 | Reminder engine (FR-041…050, WP-021) |
+| 019 | `outbox` | `user_outbox`, `content_outbox`, `reminder_outbox`, `journal_outbox` | 001 | Per-service outbox (06 §2.2, D-03, WP-024c) |
 
 **Notes:** Operational tables remain in the default `public` schema to match SRS §13.4 SQL verbatim; research tables live in `fn_research` (see §8). Retention-policy configuration (FR-105) is seeded in migration 017 and referenced by the purge jobs in §9.
 

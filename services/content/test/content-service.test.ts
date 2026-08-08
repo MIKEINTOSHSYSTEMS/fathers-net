@@ -1,9 +1,11 @@
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { createTestLogger } from '@fathersnet/test-utils';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@fathersnet/errors';
 import { ContentService, type CreateContentDraftInput } from '../src/services/content-service';
-import { createMemoryContentStore } from '../src/services/store/memory-store';
-import type { ContentRecord, ContentStore } from '../src/services/store/types';
+import {
+  createMemoryContentStore,
+  type MemoryContentStore,
+} from '../src/services/store/memory-store';
+import type { ContentRecord } from '../src/services/store/types';
 
 const AUTHOR = '11111111-1111-4111-8111-111111111111';
 const REVIEWER = '22222222-2222-4222-8222-222222222222';
@@ -22,14 +24,12 @@ function buildDraft(overrides: Partial<CreateContentDraftInput> = {}): CreateCon
 
 function setup(): {
   service: ContentService;
-  store: ContentStore;
-  eventBus: InMemoryEventBus;
+  store: MemoryContentStore;
 } {
   const store = createMemoryContentStore();
-  const eventBus = createInMemoryEventBus();
   const { logger } = createTestLogger('debug');
-  const service = new ContentService({ store, eventBus, logger });
-  return { service, store, eventBus };
+  const service = new ContentService({ store, logger });
+  return { service, store };
 }
 
 async function createDraft(
@@ -120,7 +120,7 @@ describe('ContentService workflow (WP-020, SRS §12.5, AR-015)', () => {
   });
 
   it('approve publishes in one step and emits content.published per language (FR-078, AR-015)', async () => {
-    const { service, eventBus } = setup();
+    const { service, store } = setup();
     const draft = await createDraft(service);
     await service.submit(draft.id);
 
@@ -129,25 +129,26 @@ describe('ContentService workflow (WP-020, SRS §12.5, AR-015)', () => {
     expect(result.content.medicalReviewed).toBe(true);
     expect(result.version).toBe(1);
 
-    const published = eventBus.published.filter((e) => e.type === 'content.published');
+    const published = store.outboxLog.filter((e) => e.eventType === 'content.published');
     expect(published).toHaveLength(2);
     const languages = published.map((e) => (e.payload as { language: string }).language).sort();
     expect(languages).toEqual(['am', 'en']);
-    for (const event of published) {
-      expect(event.producer).toBe('content-service');
-      expect(event.aggregate).toEqual({ type: 'content', id: draft.id });
-      expect(event.idempotency_key).toBe(`${draft.id}:1`);
-      expect(event.payload).toMatchObject({ content_id: draft.id, version: 1 });
+    for (const entry of published) {
+      expect(entry.producer).toBe('content-service');
+      expect(entry.aggregateType).toBe('content');
+      expect(entry.aggregateId).toBe(draft.id);
+      expect(entry.idempotencyKey).toBe(`${draft.id}:1`);
+      expect(entry.payload).toMatchObject({ content_id: draft.id, version: 1 });
     }
   });
 
   it('enforces segregation of duties: an author cannot approve own content (FR-106)', async () => {
-    const { service, eventBus } = setup();
+    const { service, store } = setup();
     const draft = await createDraft(service);
     await service.submit(draft.id);
 
     await expect(service.approve(draft.id, AUTHOR)).rejects.toBeInstanceOf(ForbiddenError);
-    expect(eventBus.published.filter((e) => e.type === 'content.published')).toHaveLength(0);
+    expect(store.outboxLog.filter((e) => e.eventType === 'content.published')).toHaveLength(0);
     const stored = await service.getPublished(draft.id).catch(() => null);
     expect(stored).toBeNull();
   });
@@ -171,7 +172,7 @@ describe('ContentService workflow (WP-020, SRS §12.5, AR-015)', () => {
   });
 
   it('archive removes published content from retrieval and emits content.retired (FR-080)', async () => {
-    const { service, eventBus } = setup();
+    const { service, store } = setup();
     const draft = await createDraft(service);
     await service.submit(draft.id);
     await service.approve(draft.id, REVIEWER);
@@ -181,7 +182,7 @@ describe('ContentService workflow (WP-020, SRS §12.5, AR-015)', () => {
     await expect(service.getPublished(draft.id)).rejects.toBeInstanceOf(NotFoundError);
     expect(await service.listPublished({})).toHaveLength(0);
 
-    const retired = eventBus.published.filter((e) => e.type === 'content.retired');
+    const retired = store.outboxLog.filter((e) => e.eventType === 'content.retired');
     expect(retired).toHaveLength(1);
     expect(retired[0].payload).toMatchObject({ content_id: draft.id, version: 1 });
     expect(retired[0].producer).toBe('content-service');
@@ -189,11 +190,11 @@ describe('ContentService workflow (WP-020, SRS §12.5, AR-015)', () => {
   });
 
   it('archiving an unpublished draft emits no retirement event', async () => {
-    const { service, eventBus } = setup();
+    const { service, store } = setup();
     const draft = await createDraft(service);
     const archived = await service.archive(draft.id);
     expect(archived.status).toBe('archived');
-    expect(eventBus.published.filter((e) => e.type === 'content.retired')).toHaveLength(0);
+    expect(store.outboxLog.filter((e) => e.eventType === 'content.retired')).toHaveLength(0);
   });
 
   it('lists only published content with language/week/type filters', async () => {

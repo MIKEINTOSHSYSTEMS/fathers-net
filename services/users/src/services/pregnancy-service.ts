@@ -1,12 +1,10 @@
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
-import { publishEvent } from './events';
+import { buildOutboxEntry } from './events';
 import type { PregnancyEngine, PregnancySnapshot } from './pregnancy';
-import type { PregnancyRecord, UsersStore } from './store/types';
+import type { OutboxEntry, PregnancyRecord, UsersStore } from './store/types';
 
 export interface PregnancyServiceOptions {
   store: UsersStore;
-  eventBus: EventBus;
   logger: Logger;
   engine: PregnancyEngine;
   /** Injectable clock (milliseconds) for deterministic tests. */
@@ -23,7 +21,9 @@ export interface PregnancyServiceOptions {
  * when the week actually changes, and `milestone.reached` only when the
  * milestone's week is crossed — so repeated reads emit nothing (milestone
  * events additionally carry a `(user, milestone)` idempotency key per the
- * canonical vocabulary). Events are published by `pregnancy-engine` and carry
+ * canonical vocabulary). WP-024c: events are emitted by writing outbox rows
+ * into `user_outbox` in the SAME transaction as the pregnancy upsert (the
+ * relay publishes them on commit), producer `pregnancy-engine`; payloads carry
  * no PII: `user_id, week, trimester, edd` and `user_id, milestone, week`.
  */
 export class PregnancyService {
@@ -53,30 +53,39 @@ export class PregnancyService {
       lmp: stored.lmp,
       now: this.nowIso(),
     });
+    // Events are only produced when the week/milestone actually moves, which
+    // coincides with a stored change — so they ride the same upsert TX.
+    const entries = this.buildPregnancyEntries(userId, stored, snapshot);
     if (
       snapshot.pregnancyWeek !== stored.pregnancyWeek ||
-      snapshot.trimester !== stored.trimester
+      snapshot.trimester !== stored.trimester ||
+      entries.length > 0
     ) {
-      await this.options.store.upsertPregnancy(userId, {
-        edd: stored.edd,
-        lmp: stored.lmp,
-        pregnancyWeek: snapshot.pregnancyWeek,
-        trimester: snapshot.trimester,
-      });
+      await this.options.store.upsertPregnancy(
+        userId,
+        {
+          edd: stored.edd,
+          lmp: stored.lmp,
+          pregnancyWeek: snapshot.pregnancyWeek,
+          trimester: snapshot.trimester,
+        },
+        entries,
+      );
     }
-    await this.emitPregnancyEvents(userId, stored, snapshot, undefined);
     return snapshot;
   }
 
   /**
    * Recompute after an EDD/LMP edit (FR-006): persist the new computed state
    * and emit week/milestone events. The caller (users-service) validates the
-   * input and ensures the user exists before calling.
+   * input and ensures the user exists before calling. `additionalOutbox`
+   * entries (e.g. the legacy `user.profile.updated`) are committed in the
+   * same transaction as the pregnancy upsert (WP-024c).
    */
   async refreshAfterEdit(
     userId: string,
     input: { edd: string | null; lmp: string | null },
-    requestId?: string,
+    additionalOutbox: OutboxEntry[] = [],
   ): Promise<PregnancySnapshot> {
     const previous = await this.options.store.getPregnancy(userId);
     const snapshot = this.options.engine.snapshot({
@@ -84,40 +93,46 @@ export class PregnancyService {
       lmp: input.lmp,
       now: this.nowIso(),
     });
-    await this.options.store.upsertPregnancy(userId, {
-      edd: input.edd,
-      lmp: input.lmp,
-      pregnancyWeek: snapshot.pregnancyWeek,
-      trimester: snapshot.trimester,
-    });
-    await this.emitPregnancyEvents(userId, previous, snapshot, requestId);
+    const entries = [
+      ...this.buildPregnancyEntries(userId, previous, snapshot),
+      ...additionalOutbox,
+    ];
+    await this.options.store.upsertPregnancy(
+      userId,
+      {
+        edd: input.edd,
+        lmp: input.lmp,
+        pregnancyWeek: snapshot.pregnancyWeek,
+        trimester: snapshot.trimester,
+      },
+      entries,
+    );
     return snapshot;
   }
 
-  private async emitPregnancyEvents(
+  private buildPregnancyEntries(
     userId: string,
     previous: PregnancyRecord | null,
     snapshot: PregnancySnapshot,
-    requestId: string | undefined,
-  ): Promise<void> {
+  ): OutboxEntry[] {
     const prevWeek = previous?.pregnancyWeek ?? null;
+    const entries: OutboxEntry[] = [];
 
     if (prevWeek !== snapshot.pregnancyWeek) {
-      await publishEvent({
-        bus: this.options.eventBus,
-        logger: this.options.logger,
-        type: 'pregnancy.week.changed',
-        payload: {
-          user_id: userId,
-          week: snapshot.pregnancyWeek,
-          trimester: snapshot.trimester,
-          edd: snapshot.edd,
-        },
-        requestId,
-        aggregate: { type: 'pregnancy', id: userId },
-        producer: 'pregnancy-engine',
-        idempotencyKey: `${userId}:${snapshot.pregnancyWeek}`,
-      });
+      entries.push(
+        buildOutboxEntry({
+          type: 'pregnancy.week.changed',
+          payload: {
+            user_id: userId,
+            week: snapshot.pregnancyWeek,
+            trimester: snapshot.trimester,
+            edd: snapshot.edd,
+          },
+          aggregate: { type: 'pregnancy', id: userId },
+          producer: 'pregnancy-engine',
+          idempotencyKey: `${userId}:${snapshot.pregnancyWeek}`,
+        }),
+      );
     }
 
     for (const milestone of snapshot.milestones) {
@@ -127,20 +142,20 @@ export class PregnancyService {
       if (prevWeek !== null && prevWeek >= milestone.week) {
         continue;
       }
-      await publishEvent({
-        bus: this.options.eventBus,
-        logger: this.options.logger,
-        type: 'milestone.reached',
-        payload: {
-          user_id: userId,
-          milestone: milestone.type,
-          week: milestone.week,
-        },
-        requestId,
-        aggregate: { type: 'pregnancy', id: userId },
-        producer: 'pregnancy-engine',
-        idempotencyKey: `${userId}:${milestone.type}`,
-      });
+      entries.push(
+        buildOutboxEntry({
+          type: 'milestone.reached',
+          payload: {
+            user_id: userId,
+            milestone: milestone.type,
+            week: milestone.week,
+          },
+          aggregate: { type: 'pregnancy', id: userId },
+          producer: 'pregnancy-engine',
+          idempotencyKey: `${userId}:${milestone.type}`,
+        }),
+      );
     }
+    return entries;
   }
 }

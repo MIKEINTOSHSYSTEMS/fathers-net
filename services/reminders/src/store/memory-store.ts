@@ -17,8 +17,16 @@ import type {
   DispatchInstanceInput,
   DispatchListQuery,
   DispatchOutcome,
+  OutboxEntry,
   ReminderStore,
 } from './types';
+
+/** In-memory reminder store with an outbox capture surface (WP-024c): every
+ *  outbox entry passed to a published-write store call is appended to
+ *  `outboxLog` so unit tests can assert what the relay would publish. */
+export interface MemoryReminderStore extends ReminderStore {
+  outboxLog: OutboxEntry[];
+}
 
 /**
  * In-memory reminder store — the hermetic test-double (M-08). Mirrors the
@@ -31,17 +39,23 @@ import type {
  * `initialUserQuietHours` is a test seam for `user_preferences.quiet_hours`
  * (FR-038) so quiet-hours behavior can be exercised hermetically; production
  * quiet hours come from the Postgres adapter.
+ *
+ * WP-024c: `ackDispatch` appends its outbox entries to `outboxLog` (the same
+ * atomic join the Postgres adapter commits in its ack transaction).
  */
 export function createMemoryReminderStore(
   initialUserQuietHours: Record<string, QuietHoursConfig> = {},
-): ReminderStore {
+): MemoryReminderStore {
   const templates = new Map<string, ReminderTemplate>();
   const instances = new Map<string, ReminderInstance>();
   const dispatches = new Map<string, ReminderDispatch>();
   const userQuietHours = new Map<string, QuietHoursConfig>(Object.entries(initialUserQuietHours));
   const userLanguage = new Map<string, 'en' | 'am'>();
+  const outboxLog: OutboxEntry[] = [];
 
   return {
+    outboxLog,
+
     async createTemplate(input: CreateReminderTemplateInput): Promise<ReminderTemplate> {
       const now = new Date().toISOString();
       const template: ReminderTemplate = {
@@ -244,6 +258,7 @@ export function createMemoryReminderStore(
       dispatchId: string,
       ackPayload: Record<string, unknown>,
       ackedAt: string,
+      outbox: OutboxEntry[] = [],
     ): Promise<ReminderDispatch | null> {
       const dispatch = dispatches.get(dispatchId);
       if (!dispatch || dispatch.status !== 'dispatched') {
@@ -260,6 +275,7 @@ export function createMemoryReminderStore(
       if (instance) {
         instances.set(instance.id, { ...instance, acknowledgedAt: ackedAt });
       }
+      outboxLog.push(...outbox);
       return { ...next };
     },
 
@@ -307,6 +323,7 @@ export function createMemoryReminderStore(
       templates.clear();
       instances.clear();
       dispatches.clear();
+      outboxLog.length = 0;
     },
   };
 }

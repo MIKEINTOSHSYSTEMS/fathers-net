@@ -4,6 +4,7 @@ import type {
   ConsentRecord,
   CreateConsentInput,
   CreateUserInput,
+  OutboxEntry,
   PreferencesRecord,
   PreferencesUpsertInput,
   PregnancyRecord,
@@ -14,6 +15,12 @@ import type {
   UsersStore,
 } from './types';
 
+/** Memory store shape exposing the WP-024c outbox log for hermetic assertions. */
+export interface MemoryUsersStore extends UsersStore {
+  /** Every outbox entry recorded so far, in write order (WP-024c). */
+  outboxLog: OutboxEntry[];
+}
+
 /**
  * In-memory users store — the hermetic test-double (M-08). Mirrors the
  * Postgres adapter's invariants: the phone is only ever the ciphertext the
@@ -21,15 +28,18 @@ import type {
  * unique, and the user row is created together with its child rows. The
  * `consents` stream is append-only: `insertConsent` enforces the same state
  * guard as the `004` trigger (AR-012) so hermetic tests exercise the real
- * transition rules.
+ * transition rules. WP-024c: outbox entries passed to the published-write
+ * methods are appended to `outboxLog` (the Postgres adapter joins them into
+ * the same DB transaction).
  */
-export function createMemoryUsersStore(): UsersStore {
+export function createMemoryUsersStore(): MemoryUsersStore {
   const users = new Map<string, UserRecord>();
   const byDigest = new Map<string, string>();
   const profiles = new Map<string, ProfileRecord>();
   const pregnancies = new Map<string, PregnancyRecord>();
   const preferences = new Map<string, PreferencesRecord>();
   const consents = new Map<string, ConsentRecord[]>();
+  const outboxLog: OutboxEntry[] = [];
 
   function touch(user: UserRecord): UserRecord {
     const next: UserRecord = { ...user, updatedAt: new Date().toISOString() };
@@ -80,9 +90,9 @@ export function createMemoryUsersStore(): UsersStore {
       return preferences.get(userId) ?? null;
     },
 
-    async createUser(input: CreateUserInput): Promise<UserRecord> {
+    async createUser(input: CreateUserInput, outbox: OutboxEntry[] = []): Promise<UserRecord> {
       const now = new Date().toISOString();
-      const id = randomUUID();
+      const id = input.id ?? randomUUID();
       const user: UserRecord = {
         id,
         phoneE164: input.phoneE164,
@@ -110,10 +120,15 @@ export function createMemoryUsersStore(): UsersStore {
       if (input.preferences) {
         preferences.set(id, { userId: id, ...input.preferences });
       }
+      outboxLog.push(...outbox);
       return user;
     },
 
-    async updateProfile(userId: string, patch: ProfilePatch): Promise<ProfileRecord> {
+    async updateProfile(
+      userId: string,
+      patch: ProfilePatch,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ProfileRecord> {
       const existing = profiles.get(userId);
       if (!existing) {
         throw new Error(`No profile for user ${userId}`);
@@ -124,10 +139,15 @@ export function createMemoryUsersStore(): UsersStore {
       if (user) {
         touch(user);
       }
+      outboxLog.push(...outbox);
       return next;
     },
 
-    async upsertPregnancy(userId: string, input: PregnancyUpsertInput): Promise<PregnancyRecord> {
+    async upsertPregnancy(
+      userId: string,
+      input: PregnancyUpsertInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<PregnancyRecord> {
       const existing = pregnancies.get(userId);
       const next: PregnancyRecord = {
         id: existing?.id ?? randomUUID(),
@@ -143,6 +163,7 @@ export function createMemoryUsersStore(): UsersStore {
       if (user) {
         touch(user);
       }
+      outboxLog.push(...outbox);
       return next;
     },
 
@@ -188,7 +209,10 @@ export function createMemoryUsersStore(): UsersStore {
       return record ? { ...record } : null;
     },
 
-    async insertConsent(input: CreateConsentInput): Promise<ConsentRecord> {
+    async insertConsent(
+      input: CreateConsentInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ConsentRecord> {
       const list = consents.get(input.userId) ?? [];
       const latest = latestOf(list.filter((r) => r.consentType === input.consentType));
       if (latest === null && input.state !== 'granted') {
@@ -216,6 +240,7 @@ export function createMemoryUsersStore(): UsersStore {
       };
       list.push(record);
       consents.set(input.userId, list);
+      outboxLog.push(...outbox);
       return { ...record };
     },
 
@@ -226,6 +251,9 @@ export function createMemoryUsersStore(): UsersStore {
       pregnancies.clear();
       preferences.clear();
       consents.clear();
+      outboxLog.length = 0;
     },
+
+    outboxLog,
   };
 }

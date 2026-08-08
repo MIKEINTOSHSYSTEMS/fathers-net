@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient, type QueryResult } from 'pg';
 import { ConflictError } from '@fathersnet/errors';
 import type {
   ConsentRecord,
   CreateConsentInput,
   CreateUserInput,
+  OutboxEntry,
   PreferencesRecord,
   PreferencesUpsertInput,
   PregnancyRecord,
@@ -16,6 +18,37 @@ import type {
 
 /** pg error raised by `RAISE EXCEPTION` in the `004` consent triggers (AR-012). */
 const PG_RAISE_EXCEPTION = 'P0001';
+
+/** Per-service outbox table (021-outbox, WP-024c); relay reads the same name. */
+const OUTBOX_TABLE = 'user_outbox';
+
+/**
+ * Append the given outbox rows inside the caller's transaction (D-03: domain
+ * write + outbox INSERT in one DB transaction). Uses the canonical column set
+ * from the `021-outbox` migration; `id`, `status`, `attempts`, `available_at`,
+ * `created_at`, `published_at`, `last_error` use their DB defaults.
+ */
+async function insertOutbox(client: PoolClient, entries: readonly OutboxEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await client.query(
+      `INSERT INTO ${OUTBOX_TABLE}
+         (event_id, event_type, producer, schema_version, occurred_at,
+          aggregate_type, aggregate_id, idempotency_key, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        entry.eventId,
+        entry.eventType,
+        entry.producer,
+        entry.schemaVersion,
+        entry.occurredAt,
+        entry.aggregateType,
+        entry.aggregateId,
+        entry.idempotencyKey,
+        JSON.stringify(entry.payload),
+      ],
+    );
+  }
+}
 
 /**
  * Postgres users store (WP-017/WP-018). Reads/writes the baseline schema ONLY
@@ -150,15 +183,15 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
       return result.rows.length > 0 ? parsePreferences(result.rows[0]) : null;
     },
 
-    async createUser(input: CreateUserInput): Promise<UserRecord> {
+    async createUser(input: CreateUserInput, outbox: OutboxEntry[] = []): Promise<UserRecord> {
       const client: PoolClient = await pool.connect();
       try {
         await client.query('BEGIN');
         const created: QueryResult = await client.query(
-          `INSERT INTO users (phone_e164, phone_e164_digest, role)
-           VALUES ($1, $2, $3)
+          `INSERT INTO users (id, phone_e164, phone_e164_digest, role)
+           VALUES ($1, $2, $3, $4)
            RETURNING id, phone_e164, phone_e164_digest, role, status, created_at, updated_at, deleted_at`,
-          [input.phoneE164, input.phoneE164Digest, input.role],
+          [input.id ?? randomUUID(), input.phoneE164, input.phoneE164Digest, input.role],
         );
         const user = parseUser(created.rows[0]);
 
@@ -206,6 +239,7 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
           );
         }
 
+        await insertOutbox(client, outbox);
         await client.query('COMMIT');
         return user;
       } catch (err) {
@@ -216,7 +250,11 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
       }
     },
 
-    async updateProfile(userId: string, patch: ProfilePatch): Promise<ProfileRecord> {
+    async updateProfile(
+      userId: string,
+      patch: ProfilePatch,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ProfileRecord> {
       // Map domain field names (camelCase) to the baseline `profiles` columns.
       const COLUMN_BY_FIELD: Record<keyof ProfilePatch, string> = {
         firstName: 'first_name',
@@ -242,45 +280,72 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
         throw new Error('No profile fields to update');
       }
       values.push(userId);
-      const result = await pool.query(
-        `UPDATE profiles SET ${sets.join(', ')}
-         WHERE user_id = $${index}
-         RETURNING user_id, first_name, last_name, country, region, age_group, language, cohort`,
-        values,
-      );
-      if (result.rows.length === 0) {
-        throw new Error(`No profile for user ${userId}`);
+
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await client.query(
+          `UPDATE profiles SET ${sets.join(', ')}
+           WHERE user_id = $${index}
+           RETURNING user_id, first_name, last_name, country, region, age_group, language, cohort`,
+          values,
+        );
+        if (result.rows.length === 0) {
+          throw new Error(`No profile for user ${userId}`);
+        }
+        await client.query('UPDATE users SET updated_at = now() WHERE id = $1', [userId]);
+        await insertOutbox(client, outbox);
+        await client.query('COMMIT');
+        return parseProfile(result.rows[0]);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
       }
-      await pool.query('UPDATE users SET updated_at = now() WHERE id = $1', [userId]);
-      return parseProfile(result.rows[0]);
     },
 
-    async upsertPregnancy(userId: string, input: PregnancyUpsertInput): Promise<PregnancyRecord> {
+    async upsertPregnancy(
+      userId: string,
+      input: PregnancyUpsertInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<PregnancyRecord> {
       // `pregnancies.user_id` is indexed but not unique (partner journeys may
       // hold one active row each; WP-019 owns recompute semantics). Resolve
       // the current row explicitly rather than guessing a conflict target. The
       // baseline `pregnancies` table has no timestamp column, so the PK `id`
       // provides a deterministic ordering instead.
-      const existing = await pool.query(
-        'SELECT id FROM pregnancies WHERE user_id = $1 ORDER BY id DESC LIMIT 1',
-        [userId],
-      );
-      const result =
-        existing.rows.length > 0
-          ? await pool.query(
-              `UPDATE pregnancies SET edd = $2, lmp = $3, pregnancy_week = $4, trimester = $5
-               WHERE user_id = $1
-               RETURNING id, user_id, edd, lmp, pregnancy_week, trimester, partner_user_id`,
-              [userId, input.edd, input.lmp, input.pregnancyWeek, input.trimester],
-            )
-          : await pool.query(
-              `INSERT INTO pregnancies (user_id, edd, lmp, pregnancy_week, trimester)
-               VALUES ($1, $2, $3, $4, $5)
-               RETURNING id, user_id, edd, lmp, pregnancy_week, trimester, partner_user_id`,
-              [userId, input.edd, input.lmp, input.pregnancyWeek, input.trimester],
-            );
-      await pool.query('UPDATE users SET updated_at = now() WHERE id = $1', [userId]);
-      return parsePregnancy(result.rows[0]);
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const existing = await client.query(
+          'SELECT id FROM pregnancies WHERE user_id = $1 ORDER BY id DESC LIMIT 1',
+          [userId],
+        );
+        const result =
+          existing.rows.length > 0
+            ? await client.query(
+                `UPDATE pregnancies SET edd = $2, lmp = $3, pregnancy_week = $4, trimester = $5
+                 WHERE user_id = $1
+                 RETURNING id, user_id, edd, lmp, pregnancy_week, trimester, partner_user_id`,
+                [userId, input.edd, input.lmp, input.pregnancyWeek, input.trimester],
+              )
+            : await client.query(
+                `INSERT INTO pregnancies (user_id, edd, lmp, pregnancy_week, trimester)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, user_id, edd, lmp, pregnancy_week, trimester, partner_user_id`,
+                [userId, input.edd, input.lmp, input.pregnancyWeek, input.trimester],
+              );
+        await client.query('UPDATE users SET updated_at = now() WHERE id = $1', [userId]);
+        await insertOutbox(client, outbox);
+        await client.query('COMMIT');
+        return parsePregnancy(result.rows[0]);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async upsertPreferences(
@@ -330,30 +395,43 @@ export function createPostgresUsersStore(connectionString: string): UsersStore {
       return result.rows.length > 0 ? parseConsent(result.rows[0]) : null;
     },
 
-    async insertConsent(input: CreateConsentInput): Promise<ConsentRecord> {
+    async insertConsent(
+      input: CreateConsentInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ConsentRecord> {
+      const client: PoolClient = await pool.connect();
       try {
-        const result = await pool.query(
-          `INSERT INTO consents (user_id, consent_type, version, state, granted_at, withdrawn_at)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, user_id, consent_type, version, state, granted_at, withdrawn_at`,
-          [
-            input.userId,
-            input.consentType,
-            input.version,
-            input.state,
-            input.grantedAt,
-            input.withdrawnAt,
-          ],
-        );
-        return parseConsent(result.rows[0]);
-      } catch (err) {
-        // The `004` state guard is the authoritative concurrency control: a
-        // trigger rejection under a race maps to the same domain conflict the
-        // service pre-checks (AR-012 single active grant).
-        if (isPgRaise(err)) {
-          throw new ConflictError('Consent state transition rejected');
+        await client.query('BEGIN');
+        let result: QueryResult;
+        try {
+          result = await client.query(
+            `INSERT INTO consents (user_id, consent_type, version, state, granted_at, withdrawn_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, user_id, consent_type, version, state, granted_at, withdrawn_at`,
+            [
+              input.userId,
+              input.consentType,
+              input.version,
+              input.state,
+              input.grantedAt,
+              input.withdrawnAt,
+            ],
+          );
+          await insertOutbox(client, outbox);
+        } catch (err) {
+          await client.query('ROLLBACK');
+          // The `004` state guard is the authoritative concurrency control: a
+          // trigger rejection under a race maps to the same domain conflict the
+          // service pre-checks (AR-012 single active grant).
+          if (isPgRaise(err)) {
+            throw new ConflictError('Consent state transition rejected');
+          }
+          throw err;
         }
-        throw err;
+        await client.query('COMMIT');
+        return parseConsent(result.rows[0]);
+      } finally {
+        client.release();
       }
     },
 

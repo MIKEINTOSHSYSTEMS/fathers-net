@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { NotFoundError, ValidationError } from '@fathersnet/errors';
-import { createInMemoryEventBus, type EventBus } from '@fathersnet/events';
 import { createTestLogger } from '@fathersnet/test-utils';
 import {
   createReminderService,
@@ -8,8 +7,7 @@ import {
   type ReminderServiceOptions,
 } from '../src/engine/reminder-service';
 import type { ChannelDispatcher, DispatchRequest } from '../src/services/dispatcher';
-import { createMemoryReminderStore } from '../src/store/memory-store';
-import type { ReminderStore } from '../src/store/types';
+import { createMemoryReminderStore, type MemoryReminderStore } from '../src/store/memory-store';
 import type { CreateReminderTemplateInput, ReminderTemplate } from '../src/types';
 
 const BASE_CONFIG: ReminderServiceConfig = {
@@ -47,16 +45,14 @@ function recordingDispatcher(): { requests: DispatchRequest[]; dispatcher: Chann
 
 interface Harness {
   service: ReturnType<typeof createReminderService>;
-  store: ReminderStore;
-  bus: ReturnType<typeof createInMemoryEventBus>;
+  store: MemoryReminderStore;
   setNow: (iso: string) => void;
   logs: ReturnType<typeof createTestLogger>['logs'];
   requests: DispatchRequest[];
 }
 
 function buildHarness(overrides: Partial<ReminderServiceOptions> = {}): Harness {
-  const store = (overrides.store ?? createMemoryReminderStore()) as ReminderStore;
-  const bus = createInMemoryEventBus();
+  const store = (overrides.store ?? createMemoryReminderStore()) as MemoryReminderStore;
   const { logger, logs } = createTestLogger('info');
   const { requests, dispatcher } = recordingDispatcher();
   let nowMs = Date.parse('2025-01-01T10:00:00Z');
@@ -64,7 +60,6 @@ function buildHarness(overrides: Partial<ReminderServiceOptions> = {}): Harness 
   const service = createReminderService({
     store,
     dispatcher,
-    bus,
     logger,
     config: BASE_CONFIG,
     now: () => new Date(nowMs),
@@ -74,7 +69,6 @@ function buildHarness(overrides: Partial<ReminderServiceOptions> = {}): Harness 
   return {
     service,
     store,
-    bus,
     setNow: (iso) => {
       nowMs = Date.parse(iso);
     },
@@ -189,9 +183,9 @@ describe('reminder service — scheduling (FR-043 lead time, FR-046 priority)', 
 });
 
 describe('reminder service — dispatch cycle', () => {
-  it('renders, dispatches, acks, and publishes reminder.due (FR-045, FR-047)', async () => {
+  it('renders, dispatches, acks, and records reminder.due in the outbox (FR-045, FR-047)', async () => {
     const harness = buildHarness();
-    const { service, store, bus, requests } = harness;
+    const { service, store, requests } = harness;
     await seedTemplate(store);
 
     const instance = await service.scheduleInstance({
@@ -238,13 +232,16 @@ describe('reminder service — dispatch cycle', () => {
       body: 'Your antenatal visit is coming up.',
     });
 
-    const events = bus.published.filter((e) => e.type === 'reminder.due');
-    expect(events).toHaveLength(1);
-    const event = events[0];
-    expect(event.producer).toBe('reminder-engine');
-    expect(event.idempotency_key).toBe(dispatch!.id);
-    expect(event.aggregate).toEqual({ type: 'reminder_instance', id: instance.id });
-    expect(event.payload).toMatchObject({
+    const entries = store.outboxLog.filter((e) => e.eventType === 'reminder.due');
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry.eventId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(entry.schemaVersion).toBe(1);
+    expect(entry.producer).toBe('reminder-engine');
+    expect(entry.idempotencyKey).toBe(dispatch!.id);
+    expect(entry.aggregateType).toBe('reminder_instance');
+    expect(entry.aggregateId).toBe(instance.id);
+    expect(entry.payload).toMatchObject({
       instanceId: instance.id,
       dispatchId: dispatch!.id,
       userId: USER,
@@ -375,7 +372,7 @@ describe('reminder service — dispatch cycle', () => {
   });
 
   it('marks an instance failed when rendering fails (fail-closed)', async () => {
-    const { service, store, bus } = buildHarness();
+    const { service, store } = buildHarness();
     await store.createTemplate({
       ...TEMPLATE_INPUT,
       bodyEn: 'Hi {{first_name}}',
@@ -393,7 +390,7 @@ describe('reminder service — dispatch cycle', () => {
     const after = await service.getInstance(instance.id);
     expect(after?.status).toBe('failed');
     expect(after?.lastError).toContain('Template is missing required variables');
-    expect(bus.published).toHaveLength(0);
+    expect(store.outboxLog).toHaveLength(0);
     expect(await store.listDispatches({ limit: 10, offset: 0 })).toEqual([]);
   });
 
@@ -429,33 +426,27 @@ describe('reminder service — dispatch cycle', () => {
     expect(result).toMatchObject({ expired: 1, selected: 0 });
   });
 
-  it('does not fail the operation when event publishing fails (best-effort)', async () => {
-    const store = createMemoryReminderStore();
-    const throwingBus: EventBus = {
-      async publish() {
-        throw new Error('redis down');
-      },
-      async publishMany() {
-        throw new Error('redis down');
-      },
-      async dispose() {},
-    };
-    const harness = buildHarness({ store, bus: throwingBus });
+  it('does not write an outbox entry for instances skipped in quiet hours', async () => {
+    const harness = buildHarness();
+    const { service, store } = harness;
+    harness.setNow('2025-01-01T20:30:00Z'); // 23:30 Addis
     await seedTemplate(store);
-    await harness.service.scheduleInstance({
+    await service.scheduleInstance({
       templateCode: 'antenatal_visit',
       userId: USER,
-      dueAt: '2025-01-01T09:00:00Z',
+      dueAt: '2025-01-01T20:00:00Z',
     });
 
-    await expect(harness.service.runDispatchCycle('run-1')).resolves.toMatchObject({
-      outcomes: { dispatched: 1 },
-    });
+    await service.runDispatchCycle('run-1');
+    expect(store.outboxLog).toHaveLength(0);
   });
 
   it('renders Amharic when the user preference says so (FR-047)', async () => {
     const store = createMemoryReminderStore();
-    const amStore: ReminderStore = { ...store, getUserLanguage: async () => 'am' };
+    const amStore: MemoryReminderStore = {
+      ...store,
+      getUserLanguage: async () => 'am',
+    };
     const harness = buildHarness({ store: amStore });
     await harness.service.createTemplate(TEMPLATE_INPUT);
 
@@ -467,8 +458,8 @@ describe('reminder service — dispatch cycle', () => {
     await harness.service.runDispatchCycle('run-1');
 
     expect(harness.requests[0].title).toBe('የቅድመ ወሊድ ጉብኝት ማስታወሻ');
-    const event = harness.bus.published.find((e) => e.type === 'reminder.due');
-    expect(event?.payload).toMatchObject({ language: 'am' });
+    const entry = harness.store.outboxLog.find((e) => e.eventType === 'reminder.due');
+    expect(entry?.payload).toMatchObject({ language: 'am' });
   });
 });
 

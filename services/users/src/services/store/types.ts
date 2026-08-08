@@ -100,6 +100,11 @@ export interface CreateUserPreferencesInput {
 }
 
 export interface CreateUserInput {
+  /**
+   * Durable UUID identity. When omitted the store generates it; the
+   * users-service supplies it so the `user.enrolled` outbox row (joined to the
+   * same transaction) can reference the id (WP-024c). */
+  id?: string;
   /** AES-256-GCM ciphertext (never the plaintext phone). */
   phoneE164: string;
   /** Keyed HMAC-SHA256 digest (FR-009). */
@@ -141,6 +146,39 @@ export interface PreferencesUpsertInput {
  * appends a new immutable row and the state guard (DB trigger / in-memory
  * invariant) rejects any transition that would create a second active grant.
  */
+/**
+ * Write-side outbox row (WP-024c, `021-outbox` `user_outbox` table). Mirrors
+ * the canonical 16-column contract in `packages/events/src/outbox.ts` for the
+ * columns a producer fills — `id` (uuid default), `status`, `attempts`,
+ * `available_at`, `created_at`, `published_at`, `last_error` are DB-managed.
+ */
+export interface OutboxEntry {
+  eventId: string;
+  eventType: string;
+  producer: string;
+  schemaVersion: number;
+  /** ISO 8601. */
+  occurredAt: string;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Provider-agnostic users store (M-08). WP-017/WP-018 persist the durable user
+ * record and the consent stream on the baseline `users`/`profiles`/
+ * `pregnancies`/`user_preferences`/`consents` tables (migrations 002–004) via
+ * the Postgres adapter; the in-memory test-double keeps unit/CI hermetic.
+ * Phone numbers are stored only as ciphertext + keyed digest — the store never
+ * sees the plaintext phone. `consents` is append-only (AR-012): `insertConsent`
+ * appends a new immutable row and the state guard (DB trigger / in-memory
+ * invariant) rejects any transition that would create a second active grant.
+ *
+ * WP-024c: each published-write method accepts optional outbox entries that
+ * are persisted atomically with the domain write (D-03 — one DB transaction;
+ * the in-memory store appends them to `outboxLog` for hermetic assertions).
+ */
 export interface UsersStore {
   findByPhoneDigest(digest: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
@@ -149,11 +187,19 @@ export interface UsersStore {
   getPreferences(userId: string): Promise<PreferencesRecord | null>;
 
   /** Atomically insert the user row plus its profile/pregnancy/preferences. */
-  createUser(input: CreateUserInput): Promise<UserRecord>;
+  createUser(input: CreateUserInput, outbox?: OutboxEntry[]): Promise<UserRecord>;
 
-  updateProfile(userId: string, patch: ProfilePatch): Promise<ProfileRecord>;
+  updateProfile(
+    userId: string,
+    patch: ProfilePatch,
+    outbox?: OutboxEntry[],
+  ): Promise<ProfileRecord>;
 
-  upsertPregnancy(userId: string, input: PregnancyUpsertInput): Promise<PregnancyRecord>;
+  upsertPregnancy(
+    userId: string,
+    input: PregnancyUpsertInput,
+    outbox?: OutboxEntry[],
+  ): Promise<PregnancyRecord>;
 
   upsertPreferences(userId: string, input: PreferencesUpsertInput): Promise<PreferencesRecord>;
 
@@ -164,7 +210,7 @@ export interface UsersStore {
   findConsentById(userId: string, id: string): Promise<ConsentRecord | null>;
 
   /** Append a consent record; rejects transitions that violate AR-012. */
-  insertConsent(input: CreateConsentInput): Promise<ConsentRecord>;
+  insertConsent(input: CreateConsentInput, outbox?: OutboxEntry[]): Promise<ConsentRecord>;
 
   dispose(): Promise<void>;
 }

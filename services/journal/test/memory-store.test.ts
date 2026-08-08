@@ -24,6 +24,46 @@ describe('MemoryJournalStore (M-08 test-double)', () => {
     expect(entry.updatedAt).toBeDefined();
   });
 
+  it('appends outbox entries on create and clears them on dispose (WP-024c)', async () => {
+    expect(store.outboxLog).toHaveLength(0);
+    const entry = {
+      eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      eventType: 'journal.entry.created',
+      producer: 'journal-service',
+      schemaVersion: 1,
+      occurredAt: '2026-03-01T12:00:00.000Z',
+      aggregateType: 'journal_entry',
+      aggregateId: 'entry-1',
+      idempotencyKey: 'entry-1',
+      payload: { entry_id: 'entry-1', type: 'text', week: 24 },
+    };
+
+    await store.create(
+      {
+        userId: OWNER,
+        entryType: 'text',
+        content: 'hello',
+        pregnancyWeek: 24,
+        sharedWithPartner: false,
+      },
+      [entry],
+    );
+    expect(store.outboxLog).toEqual([entry]);
+
+    // A create without outbox rows appends nothing.
+    await store.create({
+      userId: OWNER,
+      entryType: 'text',
+      content: 'no outbox',
+      pregnancyWeek: null,
+      sharedWithPartner: false,
+    });
+    expect(store.outboxLog).toHaveLength(1);
+
+    await store.dispose();
+    expect(store.outboxLog).toHaveLength(0);
+  });
+
   it('filters reads by ownership and partner share + linkage', async () => {
     store.setPartner(OWNER, PARTNER);
 

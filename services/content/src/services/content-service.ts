@@ -1,7 +1,6 @@
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@fathersnet/errors';
-import { publishEvent } from './events';
+import { buildOutboxEntry } from './events';
 import type {
   ContentLanguage,
   ContentListQuery,
@@ -9,11 +8,11 @@ import type {
   ContentStore,
   ContentType,
   ContentUpdateInput,
+  OutboxEntry,
 } from './store/types';
 
 export interface ContentServiceOptions {
   store: ContentStore;
-  eventBus: EventBus;
   logger: Logger;
 }
 
@@ -42,15 +41,38 @@ export interface ApproveResult {
  *
  * Owns the knowledge-content lifecycle. WP-020 exposes §12.5 only, so the
  * approve action performs the approve→publish transition in one step
- * (pending_medical_review → approved → published) and emits `content.published`
- * — recorded as an API/workflow interpretation decision in the WP-020
- * implementation notes. Events are best-effort (no outbox; WP-024a is the
- * upgrade path) and carry no PII — content reference data only (FR-022).
+ * (pending_medical_review → approved → published) and records `content.published`
+ * outbox rows in the same transaction as the transition (WP-024c) — recorded
+ * as an API/workflow interpretation decision in the WP-020 implementation
+ * notes. Events carry no PII — content reference data only (FR-022).
  * Segregation of duties (FR-106): the author (created_by) can never approve
  * their own content.
  */
 export class ContentService {
   constructor(private readonly options: ContentServiceOptions) {}
+
+  /** Build the `content.published`/`content.retired` outbox row for a content
+   *  version. The content version is the canonical idempotency key (06 §2.2);
+   *  approve emits once per language so the AI KB ingests each localized body. */
+  private publishedEntries(id: string, version: number): OutboxEntry[] {
+    return (['en', 'am'] as const).map((language) =>
+      buildOutboxEntry({
+        type: 'content.published',
+        payload: { content_id: id, version, language },
+        aggregate: { type: 'content', id },
+        idempotencyKey: `${id}:${version}`,
+      }),
+    );
+  }
+
+  private retiredEntry(id: string, version: number): OutboxEntry {
+    return buildOutboxEntry({
+      type: 'content.retired',
+      payload: { content_id: id, version },
+      aggregate: { type: 'content', id },
+      idempotencyKey: `${id}:${version}`,
+    });
+  }
 
   /** Create a content draft plus its version-1 snapshot (SRS §12.5 POST). */
   async createDraft(
@@ -148,29 +170,24 @@ export class ContentService {
       throw new ForbiddenError('An author cannot approve their own content');
     }
 
-    const content = await this.options.store.transition(id, {
-      from: ['pending_medical_review'],
-      to: 'published',
-      medicalReviewed: true,
-    });
-    const reviewedVersion = await this.options.store.markVersionReviewed(id, reviewerId);
-    const version = reviewedVersion.version;
+    // The reviewed version is the latest snapshot — read before the transition
+    // so the `content.published` outbox rows (idempotency key = content
+    // version, 06 §2.2) are written in the same transaction as the status
+    // change (WP-024c). The state machine makes re-approval a ConflictError,
+    // so a retry can never double-emit.
+    const versions = await this.options.store.getVersions(id);
+    const version = versions.length > 0 ? versions[versions.length - 1].version : 1;
 
-    // One event per language so the AI knowledge base ingests each localized
-    // body (payload: content_id, version, language). Canonical idempotency is
-    // the content version (06 §2.2); the state machine makes re-approval a
-    // ConflictError, so a retry can never double-emit.
-    for (const language of ['en', 'am'] as const) {
-      await publishEvent({
-        bus: this.options.eventBus,
-        logger: this.options.logger,
-        type: 'content.published',
-        payload: { content_id: id, version, language },
-        requestId,
-        aggregate: { type: 'content', id },
-        idempotencyKey: `${id}:${version}`,
-      });
-    }
+    const content = await this.options.store.transition(
+      id,
+      {
+        from: ['pending_medical_review'],
+        to: 'published',
+        medicalReviewed: true,
+      },
+      this.publishedEntries(id, version),
+    );
+    await this.options.store.markVersionReviewed(id, reviewerId);
 
     this.options.logger.info('content.published', 'content approved and published', {
       content_id: id,
@@ -193,24 +210,19 @@ export class ContentService {
     }
     const wasPublished = existing.status === 'published';
 
-    const content = await this.options.store.transition(id, {
-      from: ['draft', 'pending_medical_review', 'approved', 'published'],
-      to: 'archived',
-    });
-
-    if (wasPublished) {
-      const versions = await this.options.store.getVersions(id);
-      const version = versions.length > 0 ? versions[versions.length - 1].version : 1;
-      await publishEvent({
-        bus: this.options.eventBus,
-        logger: this.options.logger,
-        type: 'content.retired',
-        payload: { content_id: id, version },
-        requestId,
-        aggregate: { type: 'content', id },
-        idempotencyKey: `${id}:${version}`,
-      });
-    }
+    // The retired event (idempotency key = content version, 06 §2.2) is written
+    // in the same transaction as the transition (WP-024c). Only items that had
+    // been published were ever retrievable, so nothing else emits.
+    const versions = await this.options.store.getVersions(id);
+    const version = versions.length > 0 ? versions[versions.length - 1].version : 1;
+    const content = await this.options.store.transition(
+      id,
+      {
+        from: ['draft', 'pending_medical_review', 'approved', 'published'],
+        to: 'archived',
+      },
+      wasPublished ? [this.retiredEntry(id, version)] : [],
+    );
 
     this.options.logger.info('content.archived', 'content archived', {
       content_id: id,

@@ -10,7 +10,15 @@ import type {
   ContentVersionRecord,
   CreateContentInput,
   CreateContentVersionInput,
+  OutboxEntry,
 } from './types';
+
+/** In-memory content store — the hermetic test-double (M-08). */
+export interface MemoryContentStore extends ContentStore {
+  /** Outbox rows appended by transition calls (WP-024c); the hermetic analog
+   *  of the `content_outbox` table rows the Postgres adapter inserts. */
+  outboxLog: OutboxEntry[];
+}
 
 /**
  * In-memory content store — the hermetic test-double (M-08). Mirrors the
@@ -21,9 +29,10 @@ import type {
  * `published`. Search is a lightweight EN substring/term match standing in for
  * the Postgres GIN FTS index (`05` §8.5.2 — Amharic is unsupported).
  */
-export function createMemoryContentStore(): ContentStore {
+export function createMemoryContentStore(): MemoryContentStore {
   const content = new Map<string, ContentRecord>();
   const versions = new Map<string, ContentVersionRecord[]>();
+  const outboxLog: OutboxEntry[] = [];
 
   function snapshotOf(record: ContentRecord): Record<string, unknown> {
     return {
@@ -117,7 +126,11 @@ export function createMemoryContentStore(): ContentStore {
       return { ...next };
     },
 
-    async transition(id: string, change: ContentTransition): Promise<ContentRecord> {
+    async transition(
+      id: string,
+      change: ContentTransition,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ContentRecord> {
       const existing = content.get(id);
       if (!existing) {
         throw new NotFoundError('Content not found');
@@ -132,6 +145,7 @@ export function createMemoryContentStore(): ContentStore {
         updatedAt: new Date().toISOString(),
       };
       content.set(id, next);
+      outboxLog.push(...outbox);
       return { ...next };
     },
 
@@ -215,6 +229,9 @@ export function createMemoryContentStore(): ContentStore {
     async dispose(): Promise<void> {
       content.clear();
       versions.clear();
+      outboxLog.length = 0;
     },
+
+    outboxLog,
   };
 }

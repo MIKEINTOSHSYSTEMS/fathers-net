@@ -1,4 +1,5 @@
-import { Pool } from 'pg';
+import { randomUUID } from 'node:crypto';
+import { Pool, type PoolClient } from 'pg';
 import { NotFoundError } from '@fathersnet/errors';
 import { decodeCursor, encodeCursor } from './cursor';
 import type {
@@ -7,8 +8,40 @@ import type {
   JournalEntry,
   JournalEntryList,
   JournalStore,
+  OutboxEntry,
   UpdateJournalEntryInput,
 } from './types';
+
+/** Per-service outbox table (021-outbox, WP-024c); relay reads the same name. */
+const OUTBOX_TABLE = 'journal_outbox';
+
+/**
+ * Append the given outbox rows inside the caller's transaction (D-03: domain
+ * write + outbox INSERT in one DB transaction). Uses the canonical column set
+ * from the `021-outbox` migration; `id`, `status`, `attempts`, `available_at`,
+ * `created_at`, `published_at`, `last_error` use their DB defaults.
+ */
+async function insertOutbox(client: PoolClient, entries: readonly OutboxEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await client.query(
+      `INSERT INTO ${OUTBOX_TABLE}
+         (event_id, event_type, producer, schema_version, occurred_at,
+          aggregate_type, aggregate_id, idempotency_key, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        entry.eventId,
+        entry.eventType,
+        entry.producer,
+        entry.schemaVersion,
+        entry.occurredAt,
+        entry.aggregateType,
+        entry.aggregateId,
+        entry.idempotencyKey,
+        JSON.stringify(entry.payload),
+      ],
+    );
+  }
+}
 
 /**
  * Postgres journal store (WP-022). Reads/writes the migration-019 tables ONLY
@@ -48,20 +81,38 @@ export function createPostgresJournalStore(connectionString: string): JournalSto
     'id, user_id, entry_type, content, pregnancy_week, shared_with_partner, created_at, updated_at';
 
   return {
-    async create(input: CreateJournalEntryInput): Promise<JournalEntry> {
-      const result = await pool.query(
-        `INSERT INTO journal_entries (user_id, entry_type, content, pregnancy_week, shared_with_partner)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING ${ENTRY_COLUMNS}`,
-        [
-          input.userId,
-          input.entryType,
-          input.content,
-          input.pregnancyWeek,
-          input.sharedWithPartner,
-        ],
-      );
-      return parseEntry(result.rows[0]);
+    async create(
+      input: CreateJournalEntryInput,
+      outbox: OutboxEntry[] = [],
+    ): Promise<JournalEntry> {
+      // D-03: the entry INSERT and its outbox rows commit atomically (BEGIN →
+      // INSERT entry → insertOutbox → COMMIT / ROLLBACK), so a domain write can
+      // never publish without an outbox record and a failed write leaves neither.
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await client.query(
+          `INSERT INTO journal_entries (id, user_id, entry_type, content, pregnancy_week, shared_with_partner)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING ${ENTRY_COLUMNS}`,
+          [
+            input.id ?? randomUUID(),
+            input.userId,
+            input.entryType,
+            input.content,
+            input.pregnancyWeek,
+            input.sharedWithPartner,
+          ],
+        );
+        await insertOutbox(client, outbox);
+        await client.query('COMMIT');
+        return parseEntry(result.rows[0]);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async findByIdForUser(id: string, userId: string): Promise<JournalEntry | null> {

@@ -10,7 +10,39 @@ import type {
   ContentVersionRecord,
   CreateContentInput,
   CreateContentVersionInput,
+  OutboxEntry,
 } from './types';
+
+/** Per-service outbox table (021-outbox, WP-024c); relay reads the same name. */
+const OUTBOX_TABLE = 'content_outbox';
+
+/**
+ * Append the given outbox rows inside the caller's transaction (D-03: domain
+ * write + outbox INSERT in one DB transaction). Uses the canonical column set
+ * from the `021-outbox` migration; `id`, `status`, `attempts`, `available_at`,
+ * `created_at`, `published_at`, `last_error` use their DB defaults.
+ */
+async function insertOutbox(client: PoolClient, entries: readonly OutboxEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await client.query(
+      `INSERT INTO ${OUTBOX_TABLE}
+         (event_id, event_type, producer, schema_version, occurred_at,
+          aggregate_type, aggregate_id, idempotency_key, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        entry.eventId,
+        entry.eventType,
+        entry.producer,
+        entry.schemaVersion,
+        entry.occurredAt,
+        entry.aggregateType,
+        entry.aggregateId,
+        entry.idempotencyKey,
+        JSON.stringify(entry.payload),
+      ],
+    );
+  }
+}
 
 /**
  * Postgres content store (WP-020). Reads/writes the migration-011 tables ONLY
@@ -154,22 +186,37 @@ export function createPostgresContentStore(connectionString: string): ContentSto
       return parseContent(result.rows[0]);
     },
 
-    async transition(id: string, change: ContentTransition): Promise<ContentRecord> {
-      const result = await pool.query(
-        `UPDATE content
-         SET status = $2,
-             medical_reviewed = $3,
-             updated_at = now()
-         WHERE id = $1 AND status = ANY($4::text[])
-         RETURNING ${CONTENT_COLUMNS}`,
-        [id, change.to, change.medicalReviewed ?? false, change.from],
-      );
-      if (result.rows.length === 0) {
-        throw new ConflictError(
-          `Invalid transition to '${change.to}' — content is not in the expected state`,
+    async transition(
+      id: string,
+      change: ContentTransition,
+      outbox: OutboxEntry[] = [],
+    ): Promise<ContentRecord> {
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result: QueryResult = await client.query(
+          `UPDATE content
+           SET status = $2,
+               medical_reviewed = $3,
+               updated_at = now()
+           WHERE id = $1 AND status = ANY($4::text[])
+           RETURNING ${CONTENT_COLUMNS}`,
+          [id, change.to, change.medicalReviewed ?? false, change.from],
         );
+        if (result.rows.length === 0) {
+          throw new ConflictError(
+            `Invalid transition to '${change.to}' — content is not in the expected state`,
+          );
+        }
+        await insertOutbox(client, outbox);
+        await client.query('COMMIT');
+        return parseContent(result.rows[0]);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
       }
-      return parseContent(result.rows[0]);
     },
 
     async listPublished(query: ContentListQuery): Promise<ContentRecord[]> {

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { createTestLogger } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { buildJournalApp } from '../src/app';
 import { loadJournalConfig } from '../src/config';
 import { createMemoryJournalStore, type MemoryJournalStore } from '../src/store/memory-store';
@@ -36,14 +35,12 @@ function buildEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
 describe('journal API (SRS §12.9, WP-022)', () => {
   let app: FastifyInstance;
   let store: MemoryJournalStore;
-  let eventBus: InMemoryEventBus;
 
   async function boot(): Promise<void> {
     const config = loadJournalConfig(buildEnv());
     store = createMemoryJournalStore();
-    eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('info');
-    app = await buildJournalApp({ config, store, eventBus, logger });
+    app = await buildJournalApp({ config, store, logger });
     await app.ready();
   }
 
@@ -109,8 +106,11 @@ describe('journal API (SRS §12.9, WP-022)', () => {
       total: null,
     });
 
-    // No PII on the bus.
-    expect(JSON.stringify(eventBus.published[0].payload)).not.toContain('First entry');
+    // WP-024c: the create joined a `journal.entry.created` outbox row with no
+    // PII (the relay publishes it after commit).
+    expect(store.outboxLog).toHaveLength(1);
+    expect(store.outboxLog[0].eventType).toBe('journal.entry.created');
+    expect(JSON.stringify(store.outboxLog[0].payload)).not.toContain('First entry');
   });
 
   it('honors shared_with_partner on create and the explicit /share opt-in', async () => {

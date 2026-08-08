@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import { NotFoundError } from '@fathersnet/errors';
 import type { UsersService } from '../services/users-service';
@@ -11,7 +10,6 @@ export interface UsersRouteDeps {
   usersService: UsersService;
   consentsService: ConsentsService;
   pregnancyService: PregnancyService;
-  eventBus: EventBus;
   logger: Logger;
 }
 

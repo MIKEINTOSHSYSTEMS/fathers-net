@@ -1,67 +1,49 @@
-import { createEvent, type EventBus, type EventName } from '@fathersnet/events';
-import type { Logger } from '@fathersnet/logger';
+import { createEvent, type DomainEvent, type EventName } from '@fathersnet/events';
+import type { OutboxEntry } from './store/types';
 
-export interface PublishEventOptions {
-  bus: EventBus;
-  logger: Logger | undefined;
+/**
+ * Map a full event envelope to the write-side outbox row it is persisted as
+ * (WP-024c). The relay reconstructs the wire envelope from the committed row,
+ * so the `id`/`type`/`producer`/`occurred_at`/`schema_version`/aggregate/
+ * `idempotency_key` all survive verbatim. The canonical 16-column outbox
+ * contract carries no `request_id`, so request correlation stops at the
+ * service boundary for outbox-published events (approved in wp-024c §9).
+ */
+export function toOutboxEntry(event: DomainEvent<unknown>): OutboxEntry {
+  return {
+    eventId: event.id,
+    eventType: event.type,
+    producer: event.producer,
+    schemaVersion: event.schema_version,
+    occurredAt: event.occurred_at,
+    aggregateType: event.aggregate?.type ?? null,
+    aggregateId: event.aggregate?.id ?? null,
+    idempotencyKey: event.idempotency_key,
+    payload: event.payload as Record<string, unknown>,
+  };
+}
+
+export interface BuildOutboxEntryOptions {
   type: EventName;
   payload: Record<string, unknown>;
-  requestId?: string;
-  aggregate?: { type: string; id: string };
   /** Emitting service. Defaults to `user-service`; the canonical vocabulary
    *  (06 §2.2) declares `pregnancy-engine` for pregnancy events, which the
    *  in-process pregnancy service honours. */
   producer?: string;
-  /** Vocabulary-documented idempotency semantics (e.g. per (user, week)).
-   *  Defaults to the event id, as in WP-024a. */
+  aggregate?: { type: string; id: string };
+  /** Vocabulary-documented idempotency semantics (e.g. per (user, week)). */
   idempotencyKey?: string;
 }
 
-/**
- * Publish an event best-effort. WP-017 has no outbox table (the baseline
- * schema is unchanged per the WP-017 DB boundary; a per-service outbox table
- * requires a `05` §4.2 catalog row + schema approval), so a bus failure never
- * fails the operation — it is logged instead. The outbox relay pattern
- * (WP-024a) remains the upgrade path. Payloads carry no PII — never phone
- * numbers, names, or token material (FR-022).
- */
-export async function publishEvent(options: PublishEventOptions): Promise<void> {
-  const { bus, logger, type, payload } = options;
-  try {
-    await bus.publish(
-      createEvent({
-        type,
-        producer: options.producer ?? 'user-service',
-        payload,
-        request_id: options.requestId,
-        idempotency_key: options.idempotencyKey,
-        ...(options.aggregate ? { aggregate: options.aggregate } : {}),
-      }),
-    );
-  } catch (err) {
-    logger?.error('events.publish_failed', 'failed to publish event', {
-      event_type: type,
-      err: String(err),
-    });
-  }
-}
-
-/** Convenience wrapper for user-service events (producer `user-service`). */
-export async function publishUsersEvent(
-  bus: EventBus,
-  logger: Logger | undefined,
-  type: EventName,
-  payload: Record<string, unknown>,
-  requestId?: string,
-  aggregate?: { type: string; id: string },
-): Promise<void> {
-  return publishEvent({
-    bus,
-    logger,
-    type,
-    payload,
-    requestId,
-    aggregate,
-    producer: 'user-service',
-  });
+/** Build the outbox row for an event a users-service path is about to emit. */
+export function buildOutboxEntry(options: BuildOutboxEntryOptions): OutboxEntry {
+  return toOutboxEntry(
+    createEvent({
+      type: options.type,
+      producer: options.producer ?? 'user-service',
+      payload: options.payload,
+      aggregate: options.aggregate,
+      idempotency_key: options.idempotencyKey,
+    }),
+  );
 }

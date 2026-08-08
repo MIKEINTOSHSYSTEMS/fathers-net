@@ -24,6 +24,7 @@ export type {
   UpdateJournalEntryInput,
   EntryListQuery,
   JournalEntryList,
+  OutboxEntry,
 } from './types';
 
 export function createJournalStore(options: JournalStoreOptions): JournalStore {

@@ -1,16 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import { ConflictError, NotFoundError, ValidationError, type ErrorField } from '@fathersnet/errors';
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import type { PhoneEncryptor } from '../providers/phone-encryption';
 import { keyedDigest, maskPhone } from './crypto';
-import { publishUsersEvent } from './events';
+import { buildOutboxEntry } from './events';
 import { PregnancyService } from './pregnancy-service';
 import type { PregnancyEngine, PregnancySnapshot } from './pregnancy';
 import type { PreferencesUpsertInput, QuietHours, UsersStore } from './store/types';
 
 export interface UsersServiceOptions {
   store: UsersStore;
-  eventBus: EventBus;
   logger: Logger;
   phoneEncryptor: PhoneEncryptor;
   /** Key for the keyed HMAC-SHA256 phone digest (05 §8.1). */
@@ -128,46 +127,50 @@ export class UsersService {
     }
 
     const phoneE164 = this.options.phoneEncryptor.encrypt(input.phone);
-    const user = await this.options.store.createUser({
-      phoneE164,
-      phoneE164Digest,
-      role: 'father',
-      profile: {
-        firstName: input.firstName,
-        lastName: input.lastName,
-        country: input.country ?? null,
-        region: input.region ?? null,
-        ageGroup: input.ageGroup ?? null,
-        language: input.language,
-        cohort: input.cohort ?? null,
+    // The durable id is generated here so the `user.enrolled` outbox row can
+    // reference it in the SAME transaction as the user row (WP-024c, D-03).
+    const userId = randomUUID();
+    const user = await this.options.store.createUser(
+      {
+        id: userId,
+        phoneE164,
+        phoneE164Digest,
+        role: 'father',
+        profile: {
+          firstName: input.firstName,
+          lastName: input.lastName,
+          country: input.country ?? null,
+          region: input.region ?? null,
+          ageGroup: input.ageGroup ?? null,
+          language: input.language,
+          cohort: input.cohort ?? null,
+        },
+        pregnancy:
+          input.edd || input.lmp
+            ? this.computePregnancy({ edd: input.edd ?? null, lmp: input.lmp ?? null })
+            : null,
+        preferences: {
+          language: input.language,
+          quietHours: null,
+          notificationChannels: null,
+          contentCategories: null,
+        },
       },
-      pregnancy:
-        input.edd || input.lmp
-          ? this.computePregnancy({ edd: input.edd ?? null, lmp: input.lmp ?? null })
-          : null,
-      preferences: {
-        language: input.language,
-        quietHours: null,
-        notificationChannels: null,
-        contentCategories: null,
-      },
-    });
+      [
+        buildOutboxEntry({
+          type: 'user.enrolled',
+          payload: {
+            user_id: userId,
+            language: input.language,
+            ...(input.region ? { region: input.region } : {}),
+            ...(input.cohort ? { cohort: input.cohort } : {}),
+          },
+          aggregate: { type: 'user', id: userId },
+        }),
+      ],
+    );
 
     this.options.logger.info('users.enrolled', 'user enrolled', { user_id: user.id });
-
-    await publishUsersEvent(
-      this.options.eventBus,
-      this.options.logger,
-      'user.enrolled',
-      {
-        user_id: user.id,
-        language: input.language,
-        ...(input.region ? { region: input.region } : {}),
-        ...(input.cohort ? { cohort: input.cohort } : {}),
-      },
-      input.requestId,
-      { type: 'user', id: user.id },
-    );
 
     const profile = await this.load(user.id);
     return profile as UserProfileDto;
@@ -198,21 +201,18 @@ export class UsersService {
       return this.getProfile(userId);
     }
 
-    await this.options.store.updateProfile(userId, patch);
+    await this.options.store.updateProfile(userId, patch, [
+      buildOutboxEntry({
+        type: 'user.profile.updated',
+        payload: { user_id: userId, changed },
+        aggregate: { type: 'user', id: userId },
+      }),
+    ]);
 
     this.options.logger.info('users.profile_updated', 'profile updated', {
       user_id: userId,
       changed,
     });
-
-    await publishUsersEvent(
-      this.options.eventBus,
-      this.options.logger,
-      'user.profile.updated',
-      { user_id: userId, changed },
-      input.requestId,
-      { type: 'user', id: userId },
-    );
 
     const profile = await this.load(userId);
     return profile as UserProfileDto;
@@ -239,26 +239,21 @@ export class UsersService {
 
     // Recompute-on-edit (FR-006): recompute week/trimester, persist the new
     // computed state, and emit `pregnancy.week.changed`/`milestone.reached`
-    // only when something actually changed (WP-019).
-    const snapshot = await this.options.pregnancyService.refreshAfterEdit(
-      userId,
-      { edd, lmp },
-      input.requestId,
-    );
+    // only when something actually changed (WP-019). The legacy
+    // `user.profile.updated` (changed edd/lmp) rides the same transaction as
+    // the pregnancy upsert so all three events commit atomically (WP-024c).
+    const snapshot = await this.options.pregnancyService.refreshAfterEdit(userId, { edd, lmp }, [
+      buildOutboxEntry({
+        type: 'user.profile.updated',
+        payload: { user_id: userId, changed: ['edd', 'lmp'] },
+        aggregate: { type: 'user', id: userId },
+      }),
+    ]);
 
     this.options.logger.info('users.pregnancy_updated', 'pregnancy updated', {
       user_id: userId,
       pregnancy_week: snapshot.pregnancyWeek,
     });
-
-    await publishUsersEvent(
-      this.options.eventBus,
-      this.options.logger,
-      'user.profile.updated',
-      { user_id: userId, changed: ['edd', 'lmp'] },
-      input.requestId,
-      { type: 'user', id: userId },
-    );
 
     return snapshot;
   }

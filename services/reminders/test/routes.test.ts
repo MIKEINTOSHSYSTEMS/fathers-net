@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { createTestLogger } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { buildRemindersApp } from '../src/app';
 import { loadRemindersConfig } from '../src/config';
 import { dayWindow } from '../src/engine/cap';
@@ -49,15 +48,13 @@ const TEMPLATE_INPUT: CreateReminderTemplateInput = {
 describe('reminder internal API (WP-021 contract, camelCase)', () => {
   let app: FastifyInstance;
   let store: ReminderStore;
-  let eventBus: InMemoryEventBus;
 
   async function boot(env: NodeJS.ProcessEnv = buildEnv()): Promise<void> {
     const config = loadRemindersConfig(env);
     store = createMemoryReminderStore();
     await store.createTemplate(TEMPLATE_INPUT);
-    eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('info');
-    app = await buildRemindersApp({ config, store, eventBus, logger });
+    app = await buildRemindersApp({ config, store, logger });
     await app.ready();
   }
 

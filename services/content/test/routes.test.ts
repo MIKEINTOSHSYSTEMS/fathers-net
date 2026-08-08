@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { createTestLogger, createRequestId } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { loadContentConfig } from '../src/config';
 import { buildContentApp } from '../src/app';
+import {
+  createMemoryContentStore,
+  type MemoryContentStore,
+} from '../src/services/store/memory-store';
 
 const SECRET = 'test-jwt-secret-0123456789abcdef0123456789abcdef';
 const STAFF = '33333333-3333-4333-8333-333333333333';
@@ -43,13 +46,13 @@ const DRAFT = {
 
 describe('content routes (SRS §12.5, WP-020)', () => {
   let app: FastifyInstance;
-  let eventBus: InMemoryEventBus;
+  let store: MemoryContentStore;
 
   async function boot(env: NodeJS.ProcessEnv = buildEnv()): Promise<void> {
     const config = loadContentConfig(env);
-    eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('debug');
-    app = await buildContentApp({ config, eventBus, logger });
+    store = createMemoryContentStore();
+    app = await buildContentApp({ config, store, logger });
     await app.ready();
   }
 
@@ -159,7 +162,7 @@ describe('content routes (SRS §12.5, WP-020)', () => {
       version: 2,
     });
 
-    const publishedEvents = eventBus.published.filter((e) => e.type === 'content.published');
+    const publishedEvents = store.outboxLog.filter((e) => e.eventType === 'content.published');
     expect(publishedEvents).toHaveLength(2);
     expect(publishedEvents.map((e) => (e.payload as { language: string }).language).sort()).toEqual(
       ['am', 'en'],
@@ -196,7 +199,7 @@ describe('content routes (SRS §12.5, WP-020)', () => {
     expect(archive.statusCode).toBe(200);
     expect(archive.json().status).toBe('archived');
 
-    const retired = eventBus.published.filter((e) => e.type === 'content.retired');
+    const retired = store.outboxLog.filter((e) => e.eventType === 'content.retired');
     expect(retired).toHaveLength(1);
     expect(retired[0].payload).toMatchObject({ content_id: id, version: 2 });
 
@@ -228,7 +231,7 @@ describe('content routes (SRS §12.5, WP-020)', () => {
     });
     expect(create.statusCode).toBe(403);
     expect(create.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
-    expect(eventBus.published).toHaveLength(0);
+    expect(store.outboxLog).toHaveLength(0);
   });
 
   it('rejects a staff author approving their own content (SoD, FR-106)', async () => {

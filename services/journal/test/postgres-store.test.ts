@@ -47,6 +47,16 @@ class FakePg {
 
   query = this.run;
 
+  connect = async (): Promise<{
+    query: (text: string, values?: unknown[]) => Promise<PgResponse>;
+    release: jest.Mock;
+  }> => {
+    return {
+      query: this.run,
+      release: jest.fn(),
+    };
+  };
+
   end = async (): Promise<void> => {
     this.ended = true;
   };
@@ -73,7 +83,9 @@ describe('journal store Postgres adapter (SQL generation, hermetic)', () => {
 
   it('inserts an entry with the migration-019 columns and parses the row', async () => {
     const store = createPostgresJournalStore('postgres://test');
-    fake.responses.push({ rows: [ENTRY_ROW] });
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [ENTRY_ROW] }); // INSERT INTO journal_entries
+    fake.responses.push({ rows: [] }); // COMMIT
 
     const created = await store.create({
       userId: ENTRY_ROW.user_id,
@@ -91,10 +103,22 @@ describe('journal store Postgres adapter (SQL generation, hermetic)', () => {
       sharedWithPartner: false,
       createdAt: '2025-01-01T09:00:00.000Z',
     });
-    const call = fake.calls[0];
+    const texts = fake.calls.map((c) => c.text);
+    expect(texts[0]).toBe('BEGIN');
+    expect(texts[2]).toBe('COMMIT');
+    const call = fake.calls[1];
     expect(call.text).toContain('INSERT INTO journal_entries');
     expect(call.text).toContain('shared_with_partner');
-    expect(call.values).toEqual([ENTRY_ROW.user_id, 'text', ENTRY_ROW.content, 24, false]);
+    // The service-generated id leads the insert; without one, the store falls
+    // back to a fresh uuid.
+    expect(call.values).toEqual([
+      expect.stringMatching(/^[0-9a-f-]{36}$/i),
+      ENTRY_ROW.user_id,
+      'text',
+      ENTRY_ROW.content,
+      24,
+      false,
+    ]);
   });
 
   it('finds an entry for the owner or the explicitly-shared linked partner', async () => {
@@ -191,6 +215,114 @@ describe('journal store Postgres adapter (SQL generation, hermetic)', () => {
     const call = fake.calls[0];
     expect(call.text).toContain('je.user_id = $1');
     expect(call.text).toContain('ORDER BY je.created_at ASC, je.id ASC');
+  });
+
+  describe('journal store outbox transactional write (WP-024c, D-03)', () => {
+    const ENTRY_ROW_OUTBOX: Record<string, unknown> = {
+      id: ENTRY_ROW.id,
+      eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      eventType: 'journal.entry.created',
+      producer: 'journal-service',
+      schemaVersion: 1,
+      occurredAt: '2026-03-01T12:00:00.000Z',
+      aggregateType: 'journal_entry',
+      aggregateId: ENTRY_ROW.id,
+      idempotencyKey: ENTRY_ROW.id,
+      payload: { entry_id: ENTRY_ROW.id, type: 'text', week: 24 },
+    };
+
+    it('writes the journal.entry.created outbox row in the same transaction as the entry INSERT', async () => {
+      const store = createPostgresJournalStore('postgres://test');
+      fake.responses.push({ rows: [] }); // BEGIN
+      fake.responses.push({ rows: [ENTRY_ROW] }); // INSERT INTO journal_entries
+      fake.responses.push({ rows: [] }); // INSERT INTO journal_outbox
+      fake.responses.push({ rows: [] }); // COMMIT
+
+      await store.create(
+        {
+          userId: ENTRY_ROW.user_id,
+          entryType: 'text',
+          content: ENTRY_ROW.content,
+          pregnancyWeek: 24,
+          sharedWithPartner: false,
+        },
+        [
+          {
+            eventId: ENTRY_ROW_OUTBOX.eventId as string,
+            eventType: 'journal.entry.created',
+            producer: 'journal-service',
+            schemaVersion: 1,
+            occurredAt: '2026-03-01T12:00:00.000Z',
+            aggregateType: 'journal_entry',
+            aggregateId: ENTRY_ROW.id,
+            idempotencyKey: ENTRY_ROW.id,
+            payload: ENTRY_ROW_OUTBOX.payload as Record<string, unknown>,
+          },
+        ],
+      );
+
+      const texts = fake.calls.map((c) => c.text);
+      expect(texts[0]).toBe('BEGIN');
+      expect(texts[1]).toContain('INSERT INTO journal_entries');
+      expect(texts[2]).toContain('INSERT INTO journal_outbox');
+      expect(texts[3]).toBe('COMMIT');
+
+      const outboxCall = fake.calls[2];
+      expect(outboxCall.text).toContain(
+        '(event_id, event_type, producer, schema_version, occurred_at',
+      );
+      expect(outboxCall.values).toEqual([
+        ENTRY_ROW_OUTBOX.eventId,
+        'journal.entry.created',
+        'journal-service',
+        1,
+        '2026-03-01T12:00:00.000Z',
+        'journal_entry',
+        ENTRY_ROW.id,
+        ENTRY_ROW.id,
+        JSON.stringify(ENTRY_ROW_OUTBOX.payload),
+      ]);
+    });
+
+    it('rolls back the outbox row with the entry INSERT when the commit fails', async () => {
+      const store = createPostgresJournalStore('postgres://test');
+      fake.responses.push({ rows: [] }); // BEGIN
+      fake.responses.push({ rows: [ENTRY_ROW] }); // INSERT INTO journal_entries
+      fake.responses.push({ rows: [] }); // INSERT INTO journal_outbox
+      fake.errors.push({ at: 4 }); // COMMIT explodes
+
+      await expect(
+        store.create(
+          {
+            userId: ENTRY_ROW.user_id,
+            entryType: 'text',
+            content: ENTRY_ROW.content,
+            pregnancyWeek: 24,
+            sharedWithPartner: false,
+          },
+          [
+            {
+              eventId: ENTRY_ROW_OUTBOX.eventId as string,
+              eventType: 'journal.entry.created',
+              producer: 'journal-service',
+              schemaVersion: 1,
+              occurredAt: '2026-03-01T12:00:00.000Z',
+              aggregateType: 'journal_entry',
+              aggregateId: ENTRY_ROW.id,
+              idempotencyKey: ENTRY_ROW.id,
+              payload: ENTRY_ROW_OUTBOX.payload as Record<string, unknown>,
+            },
+          ],
+        ),
+      ).rejects.toThrow('synthetic db error');
+
+      const texts = fake.calls.map((c) => c.text);
+      const outboxIdx = texts.findIndex((t) => t.includes('INSERT INTO journal_outbox'));
+      const rollbackIdx = texts.indexOf('ROLLBACK');
+      expect(outboxIdx).toBeGreaterThan(-1);
+      expect(rollbackIdx).toBeGreaterThan(outboxIdx);
+      expect(texts).toContain('ROLLBACK');
+    });
   });
 
   it('pings the database and reports failure', async () => {

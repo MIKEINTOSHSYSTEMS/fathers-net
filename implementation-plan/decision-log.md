@@ -148,6 +148,19 @@ These are **Recommended** decisions authored in the plan set. They are approved 
 | **Co-approvers** | DB architect |
 | **Notes** | Migration creation only in this step — **no reminder service code, no scheduler integration, no API**. Existing migration history (001–004, 011) preserved untouched. |
 
+### 3.3 D-11 Approval Record (2026-08-08 — Project Owner)
+
+| D-11 | Per-service transactional outbox tables (WP-024c) |
+| --- | --- |
+| **Status** | **Approved (2026-08-08)** |
+| **Decision** | Adopt the canonical transactional-outbox pattern (06 §2.2, D-03) across the four in-scope services by creating per-service outbox tables `user_outbox`, `content_outbox`, `reminder_outbox`, `journal_outbox` via one migration **`021-outbox`**, with catalog row **019** appended (`05` §4.2). Each table follows the canonical 16-column `OUTBOX_TABLE_DDL` contract (`packages/events/src/outbox.ts`): uuid PK default `gen_random_uuid()`, `event_id`/`event_type`/`producer`/`schema_version`/`idempotency_key`/`payload`, `status` CHECK (`pending`/`published`/`failed`/`dead`), `attempts`, `available_at`, `created_at`, `published_at`, `last_error`, plus the partial index `outbox_pending_idx` on `(status, available_at) WHERE status IN ('pending','failed')` — no FKs, no triggers, no unique constraints, no extra indexes, no schema qualification. Scope: **users, content, reminders, journal**. **Auth and checklists excluded** (auth is Redis-only, D-09; checklists emit no events). **No new scheduler jobs** (prompt/pulse/legacy scheduler work remains WP-037). **No new event vocabulary** and **no new domain features** — all 8 in-scope events are already registered in `packages/events/src/vocabulary.ts`. |
+| **Approver** | Project Owner |
+| **Evidence** | `wp-024c-implementation-plan.md`; `05` §4.2 catalog row 019; `OUTBOX_TABLE_DDL` (`packages/events/src/outbox.ts`); `06` §2.2; `03` §4.6 (D-03); milestone-2 §5.3 (WP-024), §10 item 8 |
+| **Affected risks closed/reduced** | Milestone-2 §10 item 8 (outbox tables beyond-catalog) — resolved for WP-024c |
+| **Dependent phase unlocked** | WP-024c — migration 021 authoring step (migration-creation-only) |
+| **Co-approvers** | DB architect |
+| **Notes** | **Migration creation only in this step — no WP-024c service implementation.** Migration 021 creation is governed by a separate authorization gate. Service implementation is governed by a separate authorization gate. **WP-024c implementation is NOT authorized.** Existing migration history (001–004, 011, 018, 019, 020) preserved untouched. |
+
 ---
 
 ## 4. Open Assumptions Requiring Human Validation

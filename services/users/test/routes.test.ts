@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { createTestLogger, createRequestId } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { loadUsersConfig } from '../src/config';
 import { buildUsersApp } from '../src/app';
+import { createMemoryUsersStore, type MemoryUsersStore } from '../src/services/store/memory-store';
 
 const SECRET = 'test-jwt-secret-0123456789abcdef0123456789abcdef';
 const PHONE = '+251911111111';
@@ -34,15 +34,15 @@ describe('users routes (SRS §12.3)', () => {
   }
 
   let app: FastifyInstance;
-  let eventBus: InMemoryEventBus;
+  let store: MemoryUsersStore;
 
   async function boot(env: NodeJS.ProcessEnv = buildEnv(), nowMs?: () => number): Promise<void> {
     const config = loadUsersConfig(env);
-    eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('debug');
+    store = createMemoryUsersStore();
     app = await buildUsersApp({
       config,
-      eventBus,
+      store,
       logger,
       nowMs: nowMs ?? (() => new Date('2025-03-01T12:00:00Z').getTime()),
     });
@@ -80,9 +80,9 @@ describe('users routes (SRS §12.3)', () => {
     expect(body.phoneMasked).toBe('+2519****1111');
     expect(response.body).not.toContain('911111111');
 
-    expect(eventBus.published.map((e) => e.type)).toEqual(['user.enrolled']);
-    expect(JSON.stringify(eventBus.published[0])).not.toContain(PHONE);
-    expect(JSON.stringify(eventBus.published[0])).not.toContain('Abebe');
+    expect(store.outboxLog.map((e) => e.eventType)).toEqual(['user.enrolled']);
+    expect(JSON.stringify(store.outboxLog)).not.toContain(PHONE);
+    expect(JSON.stringify(store.outboxLog)).not.toContain('Abebe');
   });
 
   it('returns 409 for a duplicate phone', async () => {
@@ -171,7 +171,7 @@ describe('users routes (SRS §12.3)', () => {
     const final = await app.inject({ method: 'GET', url: '/v1/users/me', headers: auth });
     expect(final.json().pregnancy).toMatchObject({ edd: '2025-10-01', pregnancyWeek: 9 });
 
-    const events = eventBus.published.map((e) => e.type);
+    const events = store.outboxLog.map((e) => e.eventType);
     // PUT /me/pregnancy runs recompute-on-edit: `pregnancy.week.changed`
     // (first capture, no previous week) then the legacy `user.profile.updated`.
     expect(events).toEqual([
@@ -180,7 +180,7 @@ describe('users routes (SRS §12.3)', () => {
       'pregnancy.week.changed',
       'user.profile.updated',
     ]);
-    const weekChanged = eventBus.published.find((e) => e.type === 'pregnancy.week.changed');
+    const weekChanged = store.outboxLog.find((e) => e.eventType === 'pregnancy.week.changed');
     expect(weekChanged?.producer).toBe('pregnancy-engine');
     expect(weekChanged?.payload).toMatchObject({
       user_id: userId,
@@ -385,7 +385,7 @@ describe('users routes (SRS §12.3)', () => {
         'granted',
       ]);
 
-      const consentEvents = eventBus.published.filter((e) => e.type === 'user.consent.changed');
+      const consentEvents = store.outboxLog.filter((e) => e.eventType === 'user.consent.changed');
       expect(consentEvents.map((e) => (e.payload as { state: string }).state)).toEqual([
         'granted',
         'withdrawn',
@@ -590,7 +590,9 @@ describe('users routes (SRS §12.3)', () => {
       expect(weekOne.json().pregnancyWeek).toBe(9);
       expect(weekOne.json().countdownDays).toBe(214);
       // Registration establishes the record; no week has "changed" yet.
-      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(0);
+      expect(store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')).toHaveLength(
+        0,
+      );
 
       clockMs += 7 * 24 * 60 * 60 * 1000;
 
@@ -599,8 +601,10 @@ describe('users routes (SRS §12.3)', () => {
         url: `/v1/users/internal/pregnancy/${userId}`,
       });
       expect(weekTwo.json()).toMatchObject({ pregnancyWeek: 10, countdownDays: 207 });
-      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
-      const rollover = eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')[0];
+      expect(store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')).toHaveLength(
+        1,
+      );
+      const rollover = store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')[0];
       expect(rollover.producer).toBe('pregnancy-engine');
       expect(rollover.payload).toMatchObject({ user_id: userId, week: 10, trimester: 1, edd: EDD });
 
@@ -609,7 +613,9 @@ describe('users routes (SRS §12.3)', () => {
         url: `/v1/users/internal/pregnancy/${userId}`,
       });
       expect(weekThree.json().pregnancyWeek).toBe(10);
-      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+      expect(store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')).toHaveLength(
+        1,
+      );
     });
 
     it('emits milestone.reached when the journey crosses a milestone week', async () => {
@@ -621,7 +627,7 @@ describe('users routes (SRS §12.3)', () => {
         url: `/v1/users/internal/pregnancy/${userId}`,
       });
       expect(before.json().pregnancyWeek).toBe(11);
-      expect(eventBus.published.filter((e) => e.type === 'milestone.reached')).toHaveLength(0);
+      expect(store.outboxLog.filter((e) => e.eventType === 'milestone.reached')).toHaveLength(0);
 
       clockMs += 7 * 24 * 60 * 60 * 1000;
 
@@ -630,7 +636,7 @@ describe('users routes (SRS §12.3)', () => {
         url: `/v1/users/internal/pregnancy/${userId}`,
       });
       expect(after.json().pregnancyWeek).toBe(12);
-      const reached = eventBus.published.find((e) => e.type === 'milestone.reached');
+      const reached = store.outboxLog.find((e) => e.eventType === 'milestone.reached');
       expect(reached).toBeTruthy();
       expect(reached!.producer).toBe('pregnancy-engine');
       expect(reached!.payload).toMatchObject({
@@ -638,15 +644,19 @@ describe('users routes (SRS §12.3)', () => {
         milestone: 'first_anc_visit',
         week: 12,
       });
-      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+      expect(store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')).toHaveLength(
+        1,
+      );
 
       const repeat = await app.inject({
         method: 'GET',
         url: `/v1/users/internal/pregnancy/${userId}`,
       });
       expect(repeat.json().pregnancyWeek).toBe(12);
-      expect(eventBus.published.filter((e) => e.type === 'milestone.reached')).toHaveLength(1);
-      expect(eventBus.published.filter((e) => e.type === 'pregnancy.week.changed')).toHaveLength(1);
+      expect(store.outboxLog.filter((e) => e.eventType === 'milestone.reached')).toHaveLength(1);
+      expect(store.outboxLog.filter((e) => e.eventType === 'pregnancy.week.changed')).toHaveLength(
+        1,
+      );
     });
   });
 });

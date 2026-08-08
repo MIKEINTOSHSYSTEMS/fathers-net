@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { createTestLogger } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { JournalService } from '../src/services/journal-service';
 import { createMemoryJournalStore, type MemoryJournalStore } from '../src/store/memory-store';
 
@@ -10,17 +9,15 @@ const STRANGER = '33333333-3333-4333-8333-333333333333';
 
 describe('JournalService privacy matrix (FR-052/FR-126)', () => {
   let store: MemoryJournalStore;
-  let bus: InMemoryEventBus;
   let service: JournalService;
 
   beforeEach(() => {
     store = createMemoryJournalStore();
-    bus = createInMemoryEventBus();
     const { logger } = createTestLogger('info');
-    service = new JournalService({ store, eventBus: bus, logger });
+    service = new JournalService({ store, logger });
   });
 
-  it('creates text entries private by default and emits journal.entry.created with no content PII', async () => {
+  it('creates text entries private by default and joins journal.entry.created to the outbox with no content PII', async () => {
     const entry = await service.createEntry(OWNER, {
       content: '  Today we felt the baby kick.  ',
       pregnancyWeek: 22,
@@ -32,21 +29,26 @@ describe('JournalService privacy matrix (FR-052/FR-126)', () => {
     expect(entry.sharedWithPartner).toBe(false);
     expect(entry.userId).toBe(OWNER);
 
-    expect(bus.published).toHaveLength(1);
-    const event = bus.published[0];
-    expect(event.type).toBe('journal.entry.created');
-    expect(event.producer).toBe('journal-service');
-    expect(event.idempotency_key).toBe(entry.id);
-    expect(event.aggregate).toEqual({ type: 'journal_entry', id: entry.id });
-    expect(event.payload).toEqual({
+    // WP-024c: the entry and its outbox row commit atomically (D-03); the
+    // relay publishes the committed row, so the memory store captures it.
+    expect(store.outboxLog).toHaveLength(1);
+    const row = store.outboxLog[0];
+    expect(row.eventType).toBe('journal.entry.created');
+    expect(row.producer).toBe('journal-service');
+    expect(row.schemaVersion).toBe(1);
+    expect(row.aggregateType).toBe('journal_entry');
+    expect(row.aggregateId).toBe(entry.id);
+    expect(row.idempotencyKey).toBe(entry.id);
+    expect(row.eventId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(row.payload).toEqual({
       entry_id: entry.id,
       type: 'text',
       week: 22,
       consent_flags: { shared_with_partner: false },
     });
     // FR-022/FR-123: the journal body is never published.
-    expect(JSON.stringify(event.payload)).not.toContain('kick');
-    expect(JSON.stringify(event.payload)).not.toContain('content');
+    expect(JSON.stringify(row.payload)).not.toContain('kick');
+    expect(JSON.stringify(row.payload)).not.toContain('content');
   });
 
   it('owner can read and update their own entry', async () => {
@@ -232,27 +234,6 @@ describe('JournalService privacy matrix (FR-052/FR-126)', () => {
     // The partner's own entry (even shared) never leaks into the owner's export.
     expect(artifact.entries.some((e) => e.content === 'Partner own entry')).toBe(false);
     expect(JSON.stringify(artifact)).toBe(JSON.stringify(artifact)); // deterministic shape
-  });
-
-  it('publishes events best-effort even when the bus throws', async () => {
-    const flakyBus = {
-      published: [] as unknown[],
-      publish: async () => {
-        throw new Error('bus down');
-      },
-      publishMany: async () => {
-        throw new Error('bus down');
-      },
-      dispose: async () => undefined,
-    };
-    const { logger } = createTestLogger('info');
-    const svc = new JournalService({ store, eventBus: flakyBus as never, logger });
-    const entry = await svc.createEntry(OWNER, {
-      content: 'Survives a bus outage',
-      pregnancyWeek: null,
-      sharedWithPartner: false,
-    });
-    expect(entry.content).toBe('Survives a bus outage');
   });
 
   it('getEntry on a missing id returns 404', async () => {

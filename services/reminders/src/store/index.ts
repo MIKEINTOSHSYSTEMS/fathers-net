@@ -26,7 +26,7 @@ export type {
   CreateReminderInstanceInput,
   QuietHoursConfig,
 } from '../types';
-export type { DispatchOutcome } from './types';
+export type { DispatchOutcome, OutboxEntry } from './types';
 
 export function createReminderStore(options: ReminderStoreOptions): ReminderStore {
   if (options.driver === 'postgres' && options.databaseUrl) {

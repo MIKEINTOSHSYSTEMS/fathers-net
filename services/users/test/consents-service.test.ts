@@ -1,18 +1,15 @@
 import { createTestLogger } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { ConflictError, NotFoundError, ValidationError } from '@fathersnet/errors';
 import { ConsentsService } from '../src/services/consents-service';
-import { createMemoryUsersStore } from '../src/services/store/memory-store';
-import type { UsersStore } from '../src/services/store/types';
+import { createMemoryUsersStore, type MemoryUsersStore } from '../src/services/store/memory-store';
 
 describe('ConsentsService (WP-018, AR-012, FR-125)', () => {
   const NOW = new Date('2025-03-01T12:00:00Z').getTime();
   const V1 = 'v1.0';
   const V2 = 'v2.0';
 
-  let store: UsersStore;
+  let store: MemoryUsersStore;
   let service: ConsentsService;
-  let eventBus: InMemoryEventBus;
   let userId: string;
   let clockMs: number;
 
@@ -26,10 +23,9 @@ describe('ConsentsService (WP-018, AR-012, FR-125)', () => {
   }
 
   function build(): void {
-    eventBus = createInMemoryEventBus();
     const { logger } = createTestLogger('debug');
     store = createMemoryUsersStore();
-    service = new ConsentsService({ store, eventBus, logger, nowMs: tick });
+    service = new ConsentsService({ store, logger, nowMs: tick });
   }
 
   beforeEach(async () => {
@@ -70,19 +66,19 @@ describe('ConsentsService (WP-018, AR-012, FR-125)', () => {
     });
     expect(record.grantedAt).toBe(new Date(NOW).toISOString());
 
-    expect(eventBus.published).toHaveLength(1);
-    const event = eventBus.published[0];
-    expect(event.type).toBe('user.consent.changed');
-    expect(event.producer).toBe('user-service');
-    expect(event.aggregate).toEqual({ type: 'user', id: userId });
-    expect(event.request_id).toBe('req-1');
-    expect(event.payload).toMatchObject({
+    expect(store.outboxLog).toHaveLength(1);
+    const entry = store.outboxLog[0];
+    expect(entry.eventType).toBe('user.consent.changed');
+    expect(entry.producer).toBe('user-service');
+    expect(entry.aggregateType).toBe('user');
+    expect(entry.aggregateId).toBe(userId);
+    expect(entry.payload).toMatchObject({
       user_id: userId,
       consent_type: 'participation',
       version: V1,
       state: 'granted',
     });
-    expect(JSON.stringify(event)).not.toContain('Abebe');
+    expect(JSON.stringify(store.outboxLog)).not.toContain('Abebe');
   });
 
   it('rejects a second grant of the same type (single active grant)', async () => {
@@ -117,10 +113,8 @@ describe('ConsentsService (WP-018, AR-012, FR-125)', () => {
     expect(media.history).toHaveLength(3);
     expect(media.history.map((r) => r.state)).toEqual(['granted', 'withdrawn', 'granted']);
 
-    const types = eventBus.published.map(
-      (e) => (e.payload as { state?: string }).state ?? 'missing',
-    );
-    expect(types).toEqual(['granted', 'withdrawn', 'granted']);
+    const states = store.outboxLog.map((e) => (e.payload as { state?: string }).state ?? 'missing');
+    expect(states).toEqual(['granted', 'withdrawn', 'granted']);
   });
 
   it('rejects withdrawing an already-withdrawn consent (idempotency, 409)', async () => {

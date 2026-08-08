@@ -259,16 +259,19 @@ describe('users store Postgres adapter (SQL generation, hermetic)', () => {
 
   it('updates the given profile columns only', async () => {
     const store = createPostgresUsersStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
     fake.responses.push({ rows: [{ ...PROFILE_ROW, first_name: 'Updated', cohort: 'c2' }] });
     const updated = await store.updateProfile('u1', { firstName: 'Updated', cohort: 'c2' });
     expect(updated.firstName).toBe('Updated');
     expect(updated.cohort).toBe('c2');
 
-    const updateCall = fake.calls[0];
+    expect(fake.calls[0].text).toBe('BEGIN');
+    const updateCall = fake.calls[1];
     expect(updateCall.text).toContain('UPDATE profiles SET first_name = $1, cohort = $2');
     expect(updateCall.text).toContain('WHERE user_id = $3');
     expect(updateCall.values).toEqual(['Updated', 'c2', 'u1']);
-    expect(fake.calls[1].text).toContain('UPDATE users SET updated_at');
+    expect(fake.calls[2].text).toContain('UPDATE users SET updated_at');
+    expect(fake.calls.map((c) => c.text)).toContain('COMMIT');
   });
 
   it('throws when updating a missing profile', async () => {
@@ -280,8 +283,9 @@ describe('users store Postgres adapter (SQL generation, hermetic)', () => {
 
   it('updates an existing pregnancy row when one exists', async () => {
     const store = createPostgresUsersStore('postgres://test');
-    fake.responses.push({ rows: [{ id: 'p1' }] });
-    fake.responses.push({ rows: [PREGNANCY_ROW] });
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [{ id: 'p1' }] }); // SELECT id FROM pregnancies
+    fake.responses.push({ rows: [PREGNANCY_ROW] }); // UPDATE pregnancies ... RETURNING
     const result = await store.upsertPregnancy('u1', {
       edd: '2025-10-01',
       lmp: null,
@@ -290,14 +294,17 @@ describe('users store Postgres adapter (SQL generation, hermetic)', () => {
     });
     expect(result.edd).toBe('2025-10-01');
     const texts = fake.calls.map((c) => c.text);
-    expect(texts[0]).toContain('SELECT id FROM pregnancies');
-    expect(texts[1]).toContain('UPDATE pregnancies SET edd = $2');
+    expect(texts[0]).toBe('BEGIN');
+    expect(texts[1]).toContain('SELECT id FROM pregnancies');
+    expect(texts[2]).toContain('UPDATE pregnancies SET edd = $2');
+    expect(texts).toContain('COMMIT');
   });
 
   it('inserts a pregnancy row when none exists', async () => {
     const store = createPostgresUsersStore('postgres://test');
-    fake.responses.push({ rows: [] });
-    fake.responses.push({ rows: [PREGNANCY_ROW] });
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [] }); // SELECT id FROM pregnancies (no row)
+    fake.responses.push({ rows: [PREGNANCY_ROW] }); // INSERT pregnancies ... RETURNING
     const result = await store.upsertPregnancy('u1', {
       edd: '2025-10-01',
       lmp: null,
@@ -306,7 +313,10 @@ describe('users store Postgres adapter (SQL generation, hermetic)', () => {
     });
     expect(result.id).toBe('p1');
     const texts = fake.calls.map((c) => c.text);
-    expect(texts[1]).toContain('INSERT INTO pregnancies');
+    expect(texts[0]).toBe('BEGIN');
+    expect(texts[1]).toContain('SELECT id FROM pregnancies');
+    expect(texts[2]).toContain('INSERT INTO pregnancies');
+    expect(texts).toContain('COMMIT');
   });
 
   it('upserts preferences with COALESCE preserving unspecified fields', async () => {
@@ -329,5 +339,117 @@ describe('users store Postgres adapter (SQL generation, hermetic)', () => {
     const store = createPostgresUsersStore('postgres://test');
     await store.dispose();
     expect(fake.ended).toBe(true);
+  });
+});
+
+describe('users store outbox transactional write (WP-024c, D-03)', () => {
+  let fake: FakePg;
+
+  const ENTRY = {
+    eventId: 'e-1',
+    eventType: 'user.enrolled',
+    producer: 'user-service',
+    schemaVersion: 1,
+    occurredAt: '2025-03-01T12:00:00.000Z',
+    aggregateType: 'user',
+    aggregateId: 'u1',
+    idempotencyKey: 'u1',
+    payload: { user_id: 'u1' },
+  };
+
+  beforeEach(() => {
+    fake = new FakePg();
+    (Pool as unknown as jest.Mock).mockImplementation(() => fake);
+  });
+
+  function userInput() {
+    return {
+      id: 'u1',
+      phoneE164: 'cipher.1',
+      phoneE164Digest: 'digest.1',
+      role: 'father' as const,
+      profile: {
+        firstName: 'Abebe',
+        lastName: 'Kebede',
+        country: null,
+        region: null,
+        ageGroup: null,
+        language: 'en',
+        cohort: null,
+      },
+      pregnancy: null,
+      preferences: null,
+    };
+  }
+
+  it('writes the outbox row inside the same transaction as the domain write (createUser)', async () => {
+    const store = createPostgresUsersStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [USER_ROW] }); // INSERT users ... RETURNING
+    const user = await store.createUser(userInput(), [ENTRY]);
+    expect(user.id).toBe('u1');
+
+    const texts = fake.calls.map((c) => c.text);
+    const outboxIdx = texts.findIndex((t) => t.includes('INSERT INTO user_outbox'));
+    expect(outboxIdx).toBeGreaterThan(1);
+    expect(texts.indexOf('COMMIT')).toBeGreaterThan(outboxIdx);
+    expect(texts[0]).toBe('BEGIN');
+
+    const outboxCall = fake.calls[outboxIdx];
+    expect(outboxCall.values).toEqual([
+      'e-1',
+      'user.enrolled',
+      'user-service',
+      1,
+      '2025-03-01T12:00:00.000Z',
+      'user',
+      'u1',
+      'u1',
+      JSON.stringify({ user_id: 'u1' }),
+    ]);
+  });
+
+  it('writes the outbox row inside updateProfile and upsertPregnancy transactions', async () => {
+    const store = createPostgresUsersStore('postgres://test');
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [{ ...PROFILE_ROW, first_name: 'Updated' }] }); // UPDATE profiles ... RETURNING
+    const updated = await store.updateProfile('u1', { firstName: 'Updated' }, [
+      {
+        ...ENTRY,
+        eventType: 'user.profile.updated',
+        payload: { user_id: 'u1', changed: ['firstName'] },
+      },
+    ]);
+    expect(updated.firstName).toBe('Updated');
+    let texts = fake.calls.map((c) => c.text);
+    let outboxIdx = texts.findIndex((t) => t.includes('INSERT INTO user_outbox'));
+    expect(outboxIdx).toBeGreaterThan(0);
+    expect(texts.indexOf('COMMIT')).toBeGreaterThan(outboxIdx);
+    expect(fake.calls[outboxIdx].values?.[1]).toBe('user.profile.updated');
+
+    fake.responses.push({ rows: [] }); // BEGIN
+    fake.responses.push({ rows: [{ id: 'p1' }] }); // SELECT id FROM pregnancies
+    fake.responses.push({ rows: [PREGNANCY_ROW] }); // UPDATE pregnancies ... RETURNING
+    await store.upsertPregnancy(
+      'u1',
+      { edd: '2025-10-01', lmp: null, pregnancyWeek: 9, trimester: 1 },
+      [{ ...ENTRY, eventType: 'pregnancy.week.changed', payload: { user_id: 'u1', week: 9 } }],
+    );
+    texts = fake.calls.map((c) => c.text);
+    const selectIdx = texts.findIndex((t) => t.includes('SELECT id FROM pregnancies'));
+    outboxIdx = texts.findIndex((t, i) => i > selectIdx && t.includes('INSERT INTO user_outbox'));
+    expect(outboxIdx).toBeGreaterThan(1);
+    const commitIdx = texts.findIndex((t, i) => i > outboxIdx && t === 'COMMIT');
+    expect(commitIdx).toBeGreaterThan(outboxIdx);
+    expect(fake.calls[outboxIdx].values?.[1]).toBe('pregnancy.week.changed');
+  });
+
+  it('rolls back the outbox write when the domain write fails', async () => {
+    const store = createPostgresUsersStore('postgres://test');
+    fake.throwAfter = 1; // BEGIN ok; INSERT users throws; ROLLBACK runs.
+    await expect(store.createUser(userInput(), [ENTRY])).rejects.toThrow('duplicate key');
+    const texts = fake.calls.map((c) => c.text);
+    expect(texts).toContain('ROLLBACK');
+    expect(texts.filter((t) => t.includes('INSERT INTO user_outbox'))).toHaveLength(0);
   });
 });

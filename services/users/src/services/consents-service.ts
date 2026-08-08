@@ -1,12 +1,10 @@
 import { ConflictError, NotFoundError, ValidationError, type ErrorField } from '@fathersnet/errors';
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
-import { publishUsersEvent } from './events';
+import { buildOutboxEntry } from './events';
 import type { ConsentRecord, ConsentState, ConsentType, UsersStore } from './store/types';
 
 export interface ConsentsServiceOptions {
   store: UsersStore;
-  eventBus: EventBus;
   logger: Logger;
   /** Injectable clock (milliseconds) for deterministic tests. */
   nowMs?: () => number;
@@ -115,34 +113,34 @@ export class ConsentsService {
       throw new ConflictError(`Consent '${input.consentType}' is already granted`);
     }
 
-    const record = await this.options.store.insertConsent({
-      userId,
-      consentType: input.consentType,
-      version: input.version,
-      state: 'granted',
-      grantedAt: new Date(this.nowMs()).toISOString(),
-      withdrawnAt: null,
-    });
+    const record = await this.options.store.insertConsent(
+      {
+        userId,
+        consentType: input.consentType,
+        version: input.version,
+        state: 'granted',
+        grantedAt: new Date(this.nowMs()).toISOString(),
+        withdrawnAt: null,
+      },
+      [
+        buildOutboxEntry({
+          type: 'user.consent.changed',
+          payload: {
+            user_id: userId,
+            consent_type: input.consentType,
+            version: input.version,
+            state: 'granted',
+          },
+          aggregate: { type: 'user', id: userId },
+        }),
+      ],
+    );
 
     this.options.logger.info('users.consent_granted', 'consent granted', {
       user_id: userId,
       consent_type: record.consentType,
       version: record.version,
     });
-
-    await publishUsersEvent(
-      this.options.eventBus,
-      this.options.logger,
-      'user.consent.changed',
-      {
-        user_id: userId,
-        consent_type: record.consentType,
-        version: record.version,
-        state: 'granted',
-      },
-      input.requestId,
-      { type: 'user', id: userId },
-    );
 
     return record;
   }
@@ -162,34 +160,34 @@ export class ConsentsService {
     }
 
     const withdrawnAt = new Date(this.nowMs()).toISOString();
-    const record = await this.options.store.insertConsent({
-      userId,
-      consentType: consent.consentType,
-      version: consent.version,
-      state: 'withdrawn',
-      grantedAt: withdrawnAt,
-      withdrawnAt,
-    });
+    const record = await this.options.store.insertConsent(
+      {
+        userId,
+        consentType: consent.consentType,
+        version: consent.version,
+        state: 'withdrawn',
+        grantedAt: withdrawnAt,
+        withdrawnAt,
+      },
+      [
+        buildOutboxEntry({
+          type: 'user.consent.changed',
+          payload: {
+            user_id: userId,
+            consent_type: consent.consentType,
+            version: consent.version,
+            state: 'withdrawn',
+          },
+          aggregate: { type: 'user', id: userId },
+        }),
+      ],
+    );
 
     this.options.logger.info('users.consent_withdrawn', 'consent withdrawn', {
       user_id: userId,
       consent_type: record.consentType,
       version: record.version,
     });
-
-    await publishUsersEvent(
-      this.options.eventBus,
-      this.options.logger,
-      'user.consent.changed',
-      {
-        user_id: userId,
-        consent_type: record.consentType,
-        version: record.version,
-        state: 'withdrawn',
-      },
-      input.requestId,
-      { type: 'user', id: userId },
-    );
 
     return record;
   }

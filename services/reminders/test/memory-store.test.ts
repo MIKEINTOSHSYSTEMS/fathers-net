@@ -344,6 +344,52 @@ describe('memory reminder store (M-08 test-double)', () => {
     await expect(store.ackDispatch(dispatch.id, {}, '2025-01-05T09:10:00Z')).resolves.toBeNull();
   });
 
+  it('appends reminder.due outbox entries on ack and clears them on dispose (WP-024c)', async () => {
+    const store = createMemoryReminderStore();
+    const template = await store.createTemplate(buildTemplate());
+    const instance = await store.createInstance({
+      templateId: template.id,
+      userId: USER_A,
+      dueAt: '2025-01-05T09:00:00Z',
+      priority: 'normal',
+      channel: 'whatsapp',
+      dedupeKey: null,
+    });
+    await store.dispatchInstance({
+      instanceId: instance.id,
+      userId: USER_A,
+      runId: 'run-1',
+      channel: 'whatsapp',
+      priority: 'normal',
+      dispatchedAt: '2025-01-05T09:00:00Z',
+      dayStart: '2025-01-04T21:00:00Z',
+      dayEnd: '2025-01-05T21:00:00Z',
+      dailyCap: 5,
+    });
+    const dispatch = (await store.findDispatchForInstanceRun(instance.id, 'run-1'))!;
+    const entry = {
+      eventId: 'e-1',
+      eventType: 'reminder.due',
+      producer: 'reminder-engine',
+      schemaVersion: 1,
+      occurredAt: '2025-01-05T09:05:00.000Z',
+      aggregateType: 'reminder_instance',
+      aggregateId: instance.id,
+      idempotencyKey: dispatch.id,
+      payload: { instanceId: instance.id, dispatchId: dispatch.id, simulated: true },
+    };
+
+    expect(store.outboxLog).toHaveLength(0);
+    await store.ackDispatch(dispatch.id, { simulated: true }, '2025-01-05T09:05:00Z', [entry]);
+    expect(store.outboxLog).toEqual([entry]);
+
+    await store.ackDispatch(dispatch.id, {}, '2025-01-05T09:10:00Z', [entry]);
+    expect(store.outboxLog).toHaveLength(1); // null ack appends nothing
+
+    await store.dispose();
+    expect(store.outboxLog).toHaveLength(0);
+  });
+
   it('fails a dispatched row and its instance', async () => {
     const store = createMemoryReminderStore();
     const template = await store.createTemplate(buildTemplate());

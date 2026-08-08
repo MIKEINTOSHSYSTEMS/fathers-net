@@ -125,6 +125,18 @@ const TEMPLATE_INPUT = {
   pregnancyWeek: 12,
 };
 
+const ENTRY = {
+  eventId: 'e-reminder-due-1',
+  eventType: 'reminder.due',
+  producer: 'reminder-engine',
+  schemaVersion: 1,
+  occurredAt: '2025-03-01T12:00:00.000Z',
+  aggregateType: 'reminder_instance',
+  aggregateId: INSTANCE_ROW.id,
+  idempotencyKey: DISPATCH_ROW.id,
+  payload: { instanceId: INSTANCE_ROW.id, dispatchId: DISPATCH_ROW.id },
+};
+
 describe('reminder store Postgres adapter (SQL generation, hermetic)', () => {
   let fake: FakePg;
 
@@ -457,9 +469,85 @@ describe('reminder store Postgres adapter (SQL generation, hermetic)', () => {
     fake.responses.push({ rows: [] }); // BEGIN
     fake.responses.push({ rows: [] }); // UPDATE matched nothing
     await expect(
-      store.ackDispatch(DISPATCH_ROW.id, {}, '2025-01-05T09:05:00.000Z'),
+      store.ackDispatch(DISPATCH_ROW.id, {}, '2025-01-05T09:05:00.000Z', [ENTRY]),
     ).resolves.toBeNull();
     expect(fake.calls.map((c) => c.text)).toContain('ROLLBACK');
+    expect(fake.calls.every((c) => !c.text.includes('INSERT INTO reminder_outbox'))).toBe(true);
+  });
+
+  describe('reminder store outbox transactional write (WP-024c, D-03)', () => {
+    it('writes the reminder.due outbox row in the same transaction as the ack', async () => {
+      const store = createPostgresReminderStore('postgres://test');
+      fake.responses.push({ rows: [] }); // BEGIN
+      fake.responses.push({
+        rows: [
+          {
+            ...DISPATCH_ROW,
+            status: 'acked',
+            ack_received_at: new Date('2025-01-05T09:05:00Z'),
+            ack_payload: { providerRef: 'stub:1', simulated: true },
+          },
+        ],
+      });
+      fake.responses.push({ rows: [] }); // UPDATE instance acknowledged_at
+      fake.responses.push({ rows: [] }); // INSERT INTO reminder_outbox
+      fake.responses.push({ rows: [] }); // COMMIT
+
+      const acked = await store.ackDispatch(
+        DISPATCH_ROW.id,
+        { providerRef: 'stub:1', simulated: true },
+        '2025-01-05T09:05:00.000Z',
+        [ENTRY],
+      );
+      expect(acked).toMatchObject({ status: 'acked' });
+
+      const texts = fake.calls.map((c) => c.text);
+      expect(texts[3]).toContain('INSERT INTO reminder_outbox');
+      expect(texts[4]).toBe('COMMIT');
+
+      const outboxCall = fake.calls[3];
+      expect(outboxCall.text).toContain(
+        '(event_id, event_type, producer, schema_version, occurred_at',
+      );
+      expect(outboxCall.values).toEqual([
+        ENTRY.eventId,
+        'reminder.due',
+        'reminder-engine',
+        1,
+        '2025-03-01T12:00:00.000Z',
+        'reminder_instance',
+        INSTANCE_ROW.id,
+        DISPATCH_ROW.id,
+        JSON.stringify(ENTRY.payload),
+      ]);
+    });
+
+    it('rolls back the outbox row with the ack transaction when the commit fails', async () => {
+      const store = createPostgresReminderStore('postgres://test');
+      fake.responses.push({ rows: [] }); // BEGIN
+      fake.responses.push({
+        rows: [{ ...DISPATCH_ROW, status: 'acked' }],
+      });
+      fake.responses.push({ rows: [] }); // UPDATE instance acknowledged_at
+      fake.responses.push({ rows: [] }); // INSERT INTO reminder_outbox
+      fake.errors.push({ at: 5 }); // COMMIT explodes
+
+      await expect(
+        store.ackDispatch(
+          DISPATCH_ROW.id,
+          { providerRef: 'stub:1', simulated: true },
+          '2025-01-05T09:05:00.000Z',
+          [ENTRY],
+        ),
+      ).rejects.toThrow('synthetic db error');
+
+      const texts = fake.calls.map((c) => c.text);
+      const outboxIdx = texts.findIndex((t) => t.includes('INSERT INTO reminder_outbox'));
+      const rollbackIdx = texts.indexOf('ROLLBACK');
+      expect(outboxIdx).toBeGreaterThan(-1);
+      expect(rollbackIdx).toBeGreaterThan(outboxIdx);
+      expect(texts).toContain('ROLLBACK');
+    });
   });
 
   it('fails a dispatch and its instance in a transaction', async () => {

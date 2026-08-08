@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import type { EventBus } from '@fathersnet/events';
 import type { Logger } from '@fathersnet/logger';
 import { ForbiddenError } from '@fathersnet/errors';
 import type { ContentService } from '../services/content-service';
@@ -8,7 +7,6 @@ import type { AuthenticatedUser } from '../middleware/auth';
 
 export interface ContentRouteDeps {
   contentService: ContentService;
-  eventBus: EventBus;
   logger: Logger;
 }
 

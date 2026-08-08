@@ -1,7 +1,14 @@
 import Fastify, { LogController, type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import type Redis from 'ioredis';
+import { Client } from 'pg';
 import { createLogger, type Logger } from '@fathersnet/logger';
-import { createInMemoryEventBus, createRedisEventBus, type EventBus } from '@fathersnet/events';
+import {
+  createInMemoryEventBus,
+  createRedisEventBus,
+  OutboxRelay,
+  PostgresOutboxReader,
+  type EventBus,
+} from '@fathersnet/events';
 import type { UsersConfig } from './config';
 import { buildGenReqId, requestIdPlugin, REQUEST_ID_HEADER } from './middleware/request-id';
 import { errorHandler } from './middleware/errors';
@@ -98,14 +105,12 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
 
   const pregnancyService = new PregnancyService({
     store,
-    eventBus,
     logger,
     engine: pregnancyEngine,
     nowMs,
   });
   const usersService = new UsersService({
     store,
-    eventBus,
     logger,
     phoneEncryptor,
     phoneDigestKey: config.FN_USERS_PHONE_DIGEST_KEY,
@@ -113,16 +118,43 @@ export async function buildUsersApp(options: UsersAppOptions): Promise<FastifyIn
     pregnancyService,
     nowMs,
   });
-  const consentsService = new ConsentsService({ store, eventBus, logger, nowMs });
+  const consentsService = new ConsentsService({ store, logger, nowMs });
   const deps: UsersRouteDeps = {
     usersService,
     consentsService,
     pregnancyService,
-    eventBus,
     logger,
   };
 
+  // Outbox relay (WP-024c, D-03): the service writes `user_outbox` rows in the
+  // same DB transaction as each domain write; the relay publishes committed
+  // rows to the bus and marks them published. Only wired on the real Postgres
+  // store (never with an injected test store). `onDead` is the OR-008 alerting
+  // surface — the current sink is an error log, upgraded when an alerting
+  // channel ships.
+  let relay: OutboxRelay | null = null;
+  let relayClient: Client | null = null;
+  if (usePostgres && !options.store) {
+    relayClient = new Client({ connectionString: config.FN_DATABASE_URL });
+    await relayClient.connect();
+    relay = new OutboxRelay({
+      bus: eventBus,
+      reader: new PostgresOutboxReader(relayClient, 'user_outbox'),
+      logger,
+      onDead: async (row, error) => {
+        logger.error('outbox.dead_alert', 'Outbox row dead-lettered (OR-008)', {
+          event_id: row.event_id,
+          event_type: row.event_type,
+          error: error.message,
+        });
+      },
+    });
+    relay.start();
+  }
+
   app.addHook('onClose', async () => {
+    await relay?.stop();
+    await relayClient?.end();
     await store.dispose();
     await eventBus.dispose();
     await redisClient?.quit();

@@ -36,6 +36,26 @@ export interface DispatchListQuery {
 }
 
 /**
+ * Write-side outbox row (WP-024c, `021-outbox` `reminder_outbox` table).
+ * Mirrors the canonical 16-column contract in `packages/events/src/outbox.ts`
+ * for the columns a producer fills — `id` (uuid default), `status`,
+ * `attempts`, `available_at`, `created_at`, `published_at`, `last_error` are
+ * DB-managed.
+ */
+export interface OutboxEntry {
+  eventId: string;
+  eventType: string;
+  producer: string;
+  schemaVersion: number;
+  /** ISO 8601. */
+  occurredAt: string;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+}
+
+/**
  * Provider-agnostic reminder store (M-08). WP-021 persists on the
  * migration-018 tables (`reminder_templates`, `reminder_instances`,
  * `reminder_dispatches`) via the Postgres adapter; the in-memory test-double
@@ -83,10 +103,16 @@ export interface ReminderStore {
 
   findDispatchById(id: string): Promise<ReminderDispatch | null>;
   findDispatchForInstanceRun(instanceId: string, runId: string): Promise<ReminderDispatch | null>;
+  /** Acknowledge a dispatched send. WP-024c: `reminder.due` outbox rows are
+   *  persisted atomically with the ack (D-03 — the event payload carries
+   *  `providerRef`/`simulated`, which only exist after the channel send, so
+   *  the ack TX is the last domain write before the publish at
+   *  reminder-service.ts `#processInstance`). */
   ackDispatch(
     dispatchId: string,
     ackPayload: Record<string, unknown>,
     ackedAt: string,
+    outbox?: OutboxEntry[],
   ): Promise<ReminderDispatch | null>;
   /** Mark a dispatch row and its instance `failed` (provider returned an error).
    *  The stub dispatcher never fails; reserved for real providers (Phase 4). */

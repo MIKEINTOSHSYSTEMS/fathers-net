@@ -18,10 +18,13 @@ import type {
   DispatchInstanceInput,
   DispatchListQuery,
   DispatchOutcome,
+  OutboxEntry,
   ReminderStore,
 } from './types';
 
 const UNIQUE_VIOLATION = '23505';
+
+const OUTBOX_TABLE = 'reminder_outbox';
 
 const TEMPLATE_COLUMNS =
   'id, code, channel, priority, title_en, title_am, body_en, body_am, lead_time_minutes, quiet_hours, recurrence, pregnancy_week, active, created_at, updated_at';
@@ -31,6 +34,34 @@ const INSTANCE_COLUMNS =
 
 const DISPATCH_COLUMNS =
   'id, instance_id, user_id, run_id, channel, priority, status, dispatched_at, ack_received_at, ack_payload, last_error, created_at';
+
+/**
+ * Append the given outbox rows inside the caller's transaction (D-03: domain
+ * write + outbox INSERT in one DB transaction). Uses the canonical column set
+ * from the `021-outbox` migration; `id`, `status`, `attempts`, `available_at`,
+ * `created_at`, `published_at`, `last_error` use their DB defaults.
+ */
+async function insertOutbox(client: PoolClient, entries: readonly OutboxEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await client.query(
+      `INSERT INTO ${OUTBOX_TABLE}
+         (event_id, event_type, producer, schema_version, occurred_at,
+          aggregate_type, aggregate_id, idempotency_key, payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        entry.eventId,
+        entry.eventType,
+        entry.producer,
+        entry.schemaVersion,
+        entry.occurredAt,
+        entry.aggregateType,
+        entry.aggregateId,
+        entry.idempotencyKey,
+        JSON.stringify(entry.payload),
+      ],
+    );
+  }
+}
 
 function parseTemplate(row: Record<string, unknown>): ReminderTemplate {
   return {
@@ -344,6 +375,7 @@ export function createPostgresReminderStore(connectionString: string): ReminderS
       dispatchId: string,
       ackPayload: Record<string, unknown>,
       ackedAt: string,
+      outbox: OutboxEntry[] = [],
     ): Promise<ReminderDispatch | null> {
       const client: PoolClient = await pool.connect();
       try {
@@ -364,6 +396,7 @@ export function createPostgresReminderStore(connectionString: string): ReminderS
           dispatch.instanceId,
           ackedAt,
         ]);
+        await insertOutbox(client, outbox);
         await client.query('COMMIT');
         return dispatch;
       } catch (err) {

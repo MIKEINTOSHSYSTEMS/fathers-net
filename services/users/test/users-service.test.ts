@@ -1,9 +1,8 @@
 import { createTestLogger, type RecordedLog } from '@fathersnet/test-utils';
-import { createInMemoryEventBus, type InMemoryEventBus } from '@fathersnet/events';
 import { ConflictError, NotFoundError, ValidationError } from '@fathersnet/errors';
 import { UsersService } from '../src/services/users-service';
 import { PregnancyService } from '../src/services/pregnancy-service';
-import { createMemoryUsersStore } from '../src/services/store/memory-store';
+import { createMemoryUsersStore, type MemoryUsersStore } from '../src/services/store/memory-store';
 import { createAesGcmPhoneEncryptor } from '../src/providers/phone-encryption';
 import { createPregnancyEngine } from '../src/services/pregnancy';
 
@@ -14,25 +13,22 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
   const NOW = new Date('2025-03-01T12:00:00Z').getTime();
 
   let service: UsersService;
-  let eventBus: InMemoryEventBus;
+  let store: MemoryUsersStore;
   let logs: RecordedLog[];
 
   function build(): void {
-    eventBus = createInMemoryEventBus();
     const { logger, logs: recorded } = createTestLogger('debug');
     logs = recorded;
-    const store = createMemoryUsersStore();
+    store = createMemoryUsersStore();
     const engine = createPregnancyEngine();
     const pregnancyService = new PregnancyService({
       store,
-      eventBus,
       logger,
       engine,
       nowMs: () => NOW,
     });
     service = new UsersService({
       store,
-      eventBus,
       logger,
       phoneEncryptor: createAesGcmPhoneEncryptor(ENC_KEY),
       phoneDigestKey: DIGEST_KEY,
@@ -79,19 +75,20 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
       contentCategories: null,
     });
 
-    expect(eventBus.published.map((e) => e.type)).toEqual(['user.enrolled']);
-    const enrolled = eventBus.published[0];
+    expect(store.outboxLog.map((e) => e.eventType)).toEqual(['user.enrolled']);
+    const enrolled = store.outboxLog[0];
     expect(enrolled.producer).toBe('user-service');
-    expect(enrolled.aggregate).toEqual({ type: 'user', id: result.userId });
-    expect(enrolled.request_id).toBe('req-123');
+    expect(enrolled.eventId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(enrolled.aggregateType).toBe('user');
+    expect(enrolled.aggregateId).toBe(result.userId);
     expect(enrolled.payload).toMatchObject({
       user_id: result.userId,
       language: 'am',
       region: 'Addis Ababa',
       cohort: 'urban_fathers',
     });
-    expect(JSON.stringify(enrolled)).not.toContain(PHONE);
-    expect(JSON.stringify(enrolled)).not.toContain('Abebe');
+    expect(JSON.stringify(store.outboxLog)).not.toContain(PHONE);
+    expect(JSON.stringify(store.outboxLog)).not.toContain('Abebe');
   });
 
   it('rejects a duplicate phone with a conflict', async () => {
@@ -168,18 +165,17 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
     expect(updated.profile.cohort).toBe('cohort_2');
     expect(updated.profile.lastName).toBe('B');
 
-    const profileUpdated = eventBus.published[1];
-    expect(profileUpdated.type).toBe('user.profile.updated');
-    expect(profileUpdated.request_id).toBe('req-upd');
+    const profileUpdated = store.outboxLog[1];
+    expect(profileUpdated.eventType).toBe('user.profile.updated');
     expect(profileUpdated.payload).toEqual({
       user_id: registered.userId,
       changed: ['firstName', 'cohort'],
     });
-    expect(JSON.stringify(profileUpdated)).not.toContain('Abebe');
+    expect(JSON.stringify(store.outboxLog)).not.toContain('Abebe');
 
-    const before = eventBus.published.length;
+    const before = store.outboxLog.length;
     await service.updateProfile(registered.userId, {});
-    expect(eventBus.published.length).toBe(before);
+    expect(store.outboxLog.length).toBe(before);
   });
 
   it('validates profile updates', async () => {
@@ -213,6 +209,21 @@ describe('UsersService (WP-017, SRS §12.3)', () => {
     expect(result.trimester).toBe(1);
     expect(result.edd).toBe('2025-10-01');
     expect(result.lmp).toBeNull();
+
+    expect(store.outboxLog.map((e) => e.eventType)).toEqual([
+      'user.enrolled',
+      'pregnancy.week.changed',
+      'user.profile.updated',
+    ]);
+    const week = store.outboxLog[1];
+    expect(week.producer).toBe('pregnancy-engine');
+    expect(week.idempotencyKey).toBe(`${registered.userId}:9`);
+    expect(week.payload).toMatchObject({
+      user_id: registered.userId,
+      week: 9,
+      trimester: 1,
+      edd: '2025-10-01',
+    });
 
     await expect(
       service.updatePregnancy(registered.userId, { edd: 'not-a-date' }),
