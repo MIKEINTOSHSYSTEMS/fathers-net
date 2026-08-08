@@ -3,10 +3,26 @@ info:
   title: FathersNet Checklists Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the pre-arrival/pre-flight checklist service contract
-    (AR-003). Planned resources (implementation-plan/06 Phase B): checklist
-    definitions, user checklist progress and completions. Contracts are defined
-    here BEFORE implementation; paths land with the corresponding work package.
+    Checklists service contract (AR-003, WP-023, SRS §12.6) — service-internal
+    definition of the pre-arrival / pre-flight checklist surface. Two
+    template-driven checklists per user are lazily instantiated on first list
+    (`hospital_bag`, `birth_prep`) as EMPTY instances — WP-023 does not seed
+    the §8.2 default items (migration 017 is deferred). Users may add custom
+    items (FR-086); completing an item updates the parent `progress` on write
+    (NFR-007).
+
+    Ownership is enforced from the Bearer access JWT `sub` claim (cross-cutting
+    control, 02 §5) — the caller identity NEVER comes from the request body.
+    Invisibility (FR-126): a missing or non-owned checklist is 404, never 403,
+    so existence is never disclosed. Progress is maintained ON WRITE only
+    (0–100, two decimals); the service never recomputes it on reads.
+
+    Request and response field names follow the approved WP-023 contract
+    (camelCase in responses, snake_case on the write fields `item_name`,
+    mirroring the content contract).
+
+    This file is the single source of truth for the checklist surface; the
+    gateway aggregation of these routes is a separate work package.
   contact:
     name: FathersNet Engineering
   license:
@@ -14,15 +30,401 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3600
+    description: Local development checklists service (internal, gateway wiring is a later WP).
 
 security:
   - bearerAuth: []
 
-paths: {}
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Process liveness for compose/orchestrator healthchecks (no auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: >-
+        Readiness: verifies the store round-trip (`SELECT 1` for Postgres), so a
+        container is only marked ready once the data layer is reachable (no
+        auth).
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service is ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyzPayload'
+        '4XX':
+          description: Malformed request (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Store is not reachable (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/checklists:
+    get:
+      operationId: getChecklists
+      summary: List the caller's checklists
+      description: >-
+        Returns the caller's own checklists (hospital bag first) with their
+        items in display order. The two standard instances are materialized
+        empty on first list (template-driven instantiation, 06 Phase F). No
+        checklists of other users ever appear.
+      tags: [checklists]
+      responses:
+        '200':
+          description: The caller's checklists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistListPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/checklists/{id}:
+    get:
+      operationId: getChecklist
+      summary: Get one checklist with its items
+      description: >-
+        Returns a checklist the caller owns. Non-owned or missing ids are 404
+        so existence is never disclosed (FR-126).
+      tags: [checklists]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Checklist id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The checklist with items, progress computed on write.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Checklist not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/checklists/{id}/items:
+    post:
+      operationId: postChecklistItem
+      summary: Add a custom checklist item
+      description: >-
+        Adds a user-defined (custom) item to a checklist the caller owns
+        (FR-086 §8.2). The item is appended with the next `sort_order` and the
+        parent progress is refreshed. Non-owned checklist ids are 404.
+      tags: [checklists]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Checklist id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddChecklistItemRequest'
+      responses:
+        '201':
+          description: The created item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistItemPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Checklist not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/checklists/{id}/items/{itemId}:
+    patch:
+      operationId: patchChecklistItem
+      summary: Update a checklist item (completion toggle)
+      description: >-
+        Per-field merge on an item of a checklist the caller owns (FR-088/FR-089
+        contract): only the provided fields change. Completing an item stamps
+        `completedAt` and recomputes the parent progress in the same operation
+        (NFR-007); un-completing clears it. Non-owned or missing items are 404.
+      tags: [checklists]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Checklist id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: itemId
+          in: path
+          required: true
+          description: Item id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChecklistItemRequest'
+      responses:
+        '200':
+          description: The updated item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistItemPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Checklist or item not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id or invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+    HealthzPayload:
+      type: object
+      required: [status, service, env, version]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        env:
+          type: string
+        version:
+          type: string
+
+    ReadyzPayload:
+      type: object
+      required: [status, driver]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        driver:
+          type: string
+          enum: [memory, postgres]
+
+    ChecklistType:
+      type: string
+      enum: [hospital_bag, birth_prep]
+
+    ChecklistCategory:
+      type: string
+      enum: [Documents, Mother, Baby, Hygiene, Extras]
+
+    AddChecklistItemRequest:
+      type: object
+      required: [item_name, category]
+      additionalProperties: false
+      properties:
+        item_name:
+          type: string
+          description: Display name of the user-added item (trimmed server-side).
+          minLength: 1
+          maxLength: 200
+        category:
+          $ref: '#/components/schemas/ChecklistCategory'
+
+    UpdateChecklistItemRequest:
+      type: object
+      required: [completed]
+      additionalProperties: false
+      properties:
+        completed:
+          type: boolean
+          description: Completion toggle; true stamps `completedAt`, false clears it.
+
+    ChecklistItemPayload:
+      type: object
+      required:
+        - id
+        - checklistId
+        - category
+        - itemName
+        - completed
+        - completedAt
+        - custom
+        - sortOrder
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        checklistId:
+          $ref: '#/components/schemas/Uuid'
+        category:
+          $ref: '#/components/schemas/ChecklistCategory'
+        itemName:
+          type: string
+        completed:
+          type: boolean
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Timestamp of completion; null while incomplete.
+        custom:
+          type: boolean
+          description: True for user-added items (WP-023); seeded items are a later WP.
+        sortOrder:
+          type: integer
+          description: Display position within the checklist (0-based).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ChecklistPayload:
+      type: object
+      required:
+        - id
+        - userId
+        - checklistType
+        - title
+        - progress
+        - items
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+          description: Owning user (the token `sub` at instantiation time).
+        checklistType:
+          $ref: '#/components/schemas/ChecklistType'
+        title:
+          type: string
+          description: Display title (catalog default for standard instances).
+        progress:
+          type: number
+          description: 0–100 (two decimals), maintained on write (NFR-007).
+          minimum: 0
+          maximum: 100
+        items:
+          type: array
+          description: Items in display order (sort_order).
+          items:
+            $ref: '#/components/schemas/ChecklistItemPayload'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ChecklistListPayload:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: The caller's checklists, hospital bag first.
+          items:
+            $ref: '#/components/schemas/ChecklistPayload'

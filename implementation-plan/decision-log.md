@@ -21,13 +21,13 @@ All seven below are **Open** at authoring. Closure of all seven is a Phase 0 har
 | M-04 | Mobile framework | React Native (larger hiring pool) recommended; Flutter considered (`04` §4) | Configurable | PM-45, PM-03 | Product Engineering | **Open** |
 | M-05 | Pilot cohort size | SRS §5.9 default **500+** (configurable) | Configurable | PM-52, PM-61, PM-30 | Program + Research | **Open** |
 | M-06 | Object storage + host | Cloud object storage with server-side encryption; deny-by-default buckets, short-lived signed URLs (`04` §10, `11` §12) | Configurable | PM-13, PM-15, PM-57 | DevOps + Security | **Open** |
-| M-07 | Budget cap default | Program-suggested reference amount; scenario ranges in `20` §3–§6 | Configurable | PM-51, PM-30 | Program | **Open** |
+| M-07 | Budget cap default | Program-suggested reference amount; scenario ranges in `20` §3–§6 | Configurable | PM-51, PM-30 | Program | **Approved/Closed (2026-08-08)** |
 
 > **Source:** `02` §6 (decision items and recommended assumptions); `04` (stack evaluation behind each default); SRS §5.9 (M-05 default 500+). **Confidence:** High that these seven are the Phase 0 decisions (they are the dependency-map blockers in `02` §3/§4); Medium on the specific defaults until procurement. **Reasoning:** Each M-item is a named blocker of a dependent phase; closing them is a hard gate exit (WP-002). **Impact if changed:** Executing a dependent phase before its M-decision closes recreates PM-49 and voids the provider-abstraction guarantees (PM-08/PM-55/PM-56).
 
 ### 1.1 M-01 Closure Record (2026-08-05 — Project Owner)
 
-Closure per Section 5 rules (approver, date, decision, ADR reference, affected PM risks, dependent phase). M-02…M-07 remain **Open**.
+Closure per Section 5 rules (approver, date, decision, ADR reference, affected PM risks, dependent phase). M-02…M-06 remain **Open**; **M-07 closed 2026-08-08** — see §1.4.
 
 | M-01 | Cloud provider selection |
 | --- | --- |
@@ -40,20 +40,50 @@ Closure per Section 5 rules (approver, date, decision, ADR reference, affected P
 | **Co-approvers** | Product/Leadership + DevOps (per §1 approver column) |
 | **Notes** | Cloud-agnostic architecture decision is permanent per Section 5 change control; any later provider addition is a new decision-log entry, never a silent edit. |
 
-### 1.2 M-08 Draft — Phase 2 Open-Decision Handling (PENDING Project Owner signature)
+### 1.2 M-08 — Phase 2 Open-Decision Handling (Approved/Closed 2026-08-08)
 
-Drafted by the Milestone 2 planning review (PR `docs/milestone-2-planning-review`). Records how the Project Owner's 2026-08-05 full Phase 2 authorization (WP-015…WP-024) interacts with the §1 preamble rule "no provider-dependent build begins before the relevant M-decision is closed" and the `21` G1-02 "all M-decisions closed" item. **DRAFT — no closure record until the Project Owner signs.** Per Section 5 rule 5, a decision blocked at the named approver escalates via `17` §9; Phase 2 implementation remains gated on this closure.
+Drafted by the Milestone 2 planning review (PR `docs/milestone-2-planning-review`). Records how the Project Owner's 2026-08-05 full Phase 2 authorization (WP-015…WP-024) interacts with the §1 preamble rule "no provider-dependent build begins before the relevant M-decision is closed" and the `21` G1-02 "all M-decisions closed" item. **APPROVED/CLOSED 2026-08-08 — closure record in §1.3.** Per Section 5 rule 5, a decision blocked at the named approver escalates via `17` §9; Phase 2 implementation remained gated on this closure until it was recorded.
 
 | M-08 | Phase 2 open-decision handling + provider-agnostic test-doubles |
 | --- | --- |
-| **Status** | **Draft — pending Project Owner signature** (NOT closed) |
-| **Decision (proposed)** | (1) Phase 2 (WP-015…WP-024) executes behind **provider-agnostic adapters + test-doubles** consistent with AR-004/FR-149 and the M-01 cloud-agnostic precedent — no provider-coupled code lands in Phase 2. (2) **M-07** adopted at the `20` reference default as a configurable budget cap for WP-023. (3) **M-02** OTP delivery channel uses an adapter + test-double; the final provider is deferred to Phase 4 procurement (D-01). (4) **M-03/M-04/M-05/M-06** remain Open and are consumed only at their documented phases. (5) This entry records the Project Owner's Phase 2 authorization as the governing override of the literal "all seven closed before code" rule **for Phase 2 only**; `21` G1-02 relaxation noted. |
-| **Approver** | **Project Owner (signature pending)** |
-| **Evidence** | Full Phase 2 Authorization governance record 2026-08-05; `17` §2.1; `21` G1-02; `06` Phase B (OTP adapter, M-02 line); `06` line 794 (M-07 at Phase F) |
-| **Affected risks closed/reduced** | PM-49 partially reduced (M-02…M-07 still Open); PM-08/PM-55/PM-56 preserved via adapters |
+| **Status** | **Approved/Closed (2026-08-08)** — closure record §1.3 |
+| **Decision** | (1) Phase 2 (WP-015…WP-024) executes behind **provider-agnostic adapters + test-doubles** consistent with AR-004/FR-149 and the M-01 cloud-agnostic precedent — no provider-coupled code lands in Phase 2. (2) **M-07** budget cap adopted as a configurable parameter for WP-023 per the M-07 closure record (§1.4) — **Option B: `FN_BUDGET_CAP = 0` (unset)**; no per-user reference amount approved. (3) **M-02** OTP delivery channel uses an adapter + test-double; the final provider is deferred to Phase 4 procurement (D-01). (4) **M-03/M-04/M-05/M-06** remain Open and are consumed only at their documented phases. (5) This entry records the Project Owner's Phase 2 authorization as the governing override of the literal "all seven closed before code" rule **for Phase 2 only**; `21` G1-02 relaxation noted. |
+| **Approver** | **Project Owner** |
+| **Evidence** | Full Phase 2 Authorization governance record 2026-08-05; WP-023 Governance Resolution & Verification authorization 2026-08-08 (Project Owner decision — M-08 approval/closure and M-07 Option B); `17` §2.1; `21` G1-02; `06` Phase B (OTP adapter, M-02 line); `06` line 794 (M-07 at Phase F) |
+| **Affected risks closed/reduced** | PM-49 partially reduced (M-02…M-06 still Open); PM-08/PM-55/PM-56 preserved via adapters |
 | **Dependent phase unlocked** | Phase 2 / Milestone 2 (WP-015…WP-024) business implementation |
 | **Co-approvers** | DB architect (R1 auth-storage decision), Technical Lead |
-| **Notes** | `05` §4.3 holds the pending auth-state storage decision; `staff_users`/`staff_mfa` may be decided separately from the OTP/refresh-token store. |
+| **Notes** | Draft item (2) ("adopt the `20` reference default") superseded by the M-07 closure record (§1.4) — no per-user reference amount approved. `05` §4.3 holds the pending auth-state storage decision; `staff_users`/`staff_mfa` may be decided separately from the OTP/refresh-token store. |
+
+### 1.3 M-08 Closure Record (2026-08-08 — Project Owner)
+
+Closure per Section 5 rules (approver, date, decision, ADR reference, affected PM risks, dependent phase).
+
+| M-08 | Phase 2 open-decision handling + provider-agnostic test-doubles |
+| --- | --- |
+| **Status** | Approved/Closed (2026-08-08) |
+| **Decision** | Phase 2 (WP-015…WP-024) executes behind **provider-agnostic adapters + test-doubles** consistent with AR-004/FR-149 and the M-01 cloud-agnostic precedent — no provider-coupled code lands in Phase 2. M-02 OTP delivery channel uses an adapter + test-double; the final provider is deferred to Phase 4 procurement (D-01). M-03/M-04/M-05/M-06 remain Open and are consumed only at their documented phases. The Project Owner's Phase 2 authorization is recorded as the governing override of the literal "all seven closed before code" rule **for Phase 2 only**; `21` G1-02 relaxation noted. |
+| **Approver** | Project Owner |
+| **Evidence** | WP-023 Governance Resolution & Verification authorization 2026-08-08 (Project Owner decision instruction) — the actual authorization for this closure record; Full Phase 2 Authorization governance record 2026-08-05; `17` §2.1; `21` G1-02; `06` Phase B (OTP adapter, M-02 line); `06` line 794 (M-07 at Phase F) |
+| **Affected risks closed/reduced** | PM-49 partially reduced (M-02…M-06 still Open); PM-08/PM-55/PM-56 preserved via adapters |
+| **Dependent phase unlocked** | Phase 2 / Milestone 2 (WP-015…WP-024) business implementation |
+| **Co-approvers** | DB architect (R1 auth-storage decision), Technical Lead |
+| **Notes** | The draft §1.2 item (2) reference to the `20` reference default is superseded by the M-07 closure record (§1.4) — **Option B: `FN_BUDGET_CAP = 0` (unset)**; no per-user reference amount approved. `05` §4.3 holds the pending auth-state storage decision; `staff_users`/`staff_mfa` may be decided separately from the OTP/refresh-token store. |
+
+### 1.4 M-07 Closure Record (2026-08-08 — Project Owner)
+
+Closure per Section 5 rules (approver, date, decision, ADR reference, affected PM risks, dependent phase).
+
+| M-07 | Budget cap default |
+| --- | --- |
+| **Status** | Approved/Closed (2026-08-08) |
+| **Decision** | **Option B — budget cap disabled/unset: `FN_BUDGET_CAP = 0`.** The per-user budget-cap **reference amount is not approved**; the `20` §4 program-level scenarios (≈$474k / $606k / $801k) are **program-level ceilings, not per-user caps** and must not be used as a per-user budget cap. WP-023 summary reports `cap: null` and `remaining: null` while the cap is unset. Any future per-user reference amount requires a **separate governance decision**. Existing checklist & budget implementation behavior remains unchanged. |
+| **Approver** | Project Owner |
+| **Evidence** | WP-023 Governance Resolution & Verification authorization 2026-08-08 (Project Owner decision — M-07 Option B); `02` §6 M-07; SRS §1.11 (configurable parameters) / §8.3 (per-user tracker cap, configurable); `20` §4/§9 (program-level ceilings — not per-user caps); `services/checklists/src/config.ts` `FN_BUDGET_CAP` (default `0`); `milestone-2-implementation-plan.md` §10 item 2 |
+| **Affected risks closed/reduced** | PM-51 (cost tracking configurable; cap unset pending a future reference decision); PM-30 |
+| **Dependent phase unlocked** | WP-023 (Checklist & budget service) — budget-cap configuration resolved; implementation COMPLETED (working tree, uncommitted); commit/push/PR pending separate authorization |
+| **Co-approvers** | Program (per §1 approver column) |
+| **Notes** | The draft M-08 §1.2 item (2) ("adopt the `20` reference default") is superseded by this decision (OR-005 — superseded + replacement, never a silent edit). No per-user numeric reference amount appears in any approved record; SRS §8.3 defines the cap as configurable with a "program-suggested reference amount" default that was never quantified in an approved decision. |
 
 ---
 
@@ -176,4 +206,4 @@ Closed governance decisions adopted via the **Repository Governance Resolution**
 
 ---
 
-**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07: **M-01 Approved/Closed 2026-08-05 (Project Owner — initial production cloud provider GCP, cloud-agnostic architecture)**; M-02…M-07 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked (**D-09 — auth-state storage (Option A, Redis-only, WP-016) Approved/Closed 2026-08-06 — Project Owner**); assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. **AGD-001 (repository governance) and AGD-002 (solo-maintainer merge policy) Approved/Closed 2026-08-05.** Created as WP-002 of `17-final-execution-roadmap.md`.
+**END OF DOCUMENT — Decision Log (FathersNet / Ayay).** Seven Phase 0 gate decisions M-01…M-07: **M-01 Approved/Closed 2026-08-05 (Project Owner — initial production cloud provider GCP, cloud-agnostic architecture)**; **M-07 Approved/Closed 2026-08-08 (Project Owner — Option B: `FN_BUDGET_CAP = 0`, unset; no per-user reference amount; §1.4)**; **M-08 Approved/Closed 2026-08-08 (Project Owner — Phase 2 open-decision handling + provider-agnostic test-doubles; §1.2/§1.3)**; M-02…M-06 recorded Open with recommended defaults; ADR-001…006 confirmed as SRS-stated; recommended implementation decisions D-01…D-08 tracked (**D-09 — auth-state storage (Option A, Redis-only, WP-016) Approved/Closed 2026-08-06 — Project Owner**; **D-10 — WP-021 reminder tables, migration 018, Approved 2026-08-07**); assumptions A-01…A-06 listed for validation; closure and change-control rules per OR-005/OR-019. **AGD-001 (repository governance) and AGD-002 (solo-maintainer merge policy) Approved/Closed 2026-08-05.** Created as WP-002 of `17-final-execution-roadmap.md`.

@@ -1,0 +1,36 @@
+{
+  "name": "@fathersnet/checklists",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FathersNet checklist & budget service — hospital-bag/birth-prep checklists, custom items, on-write progress, budget tracker with planned/actual/variance and configurable M-07 cap (WP-023)",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
+    "sast": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@fathersnet/config": "*",
+    "@fathersnet/errors": "*",
+    "@fathersnet/logger": "*",
+    "fastify": "5.11.2",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@fathersnet/test-utils": "*",
+    "@types/jsonwebtoken": "9.0.7",
+    "@types/pg": "8.11.10"
+  }
+}

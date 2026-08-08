@@ -23,6 +23,7 @@ const MIGRATION_NAMES = [
   '011-content',
   '018-reminders',
   '019-journal',
+  '020-checklist-budget',
 ];
 
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -40,7 +41,7 @@ async function rows(client: Client, sql: string, params: unknown[] = []) {
   return result.rows;
 }
 
-describeMigrate('database migration baseline (001-019)', () => {
+describeMigrate('database migration baseline (001-020)', () => {
   beforeAll(async () => {
     await runMigrations({ databaseUrl: DATABASE_URL as string });
   });
@@ -858,6 +859,200 @@ describeMigrate('database migration baseline (001-019)', () => {
     });
   });
 
+  it('creates checklist and budget tables with domain checks, indexes and cascade FK', async () => {
+    await withClient(async (client) => {
+      const checklistColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'checklists' ORDER BY ordinal_position`,
+      );
+      expect(checklistColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'user_id',
+        'checklist_type',
+        'title',
+        'progress',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const checklistIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'checklists' ORDER BY indexname`,
+      );
+      const cIndexes = checklistIndexes
+        .map((r) => r.indexname)
+        .filter((n) => !n.endsWith('_pkey'))
+        .sort();
+      expect(cIndexes).toEqual(['idx_checklists_type', 'uq_checklists_user_type']);
+      expect(
+        checklistIndexes.find((r) => r.indexname === 'uq_checklists_user_type').indexdef,
+      ).toContain('UNIQUE');
+
+      const itemColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'checklist_items' ORDER BY ordinal_position`,
+      );
+      expect(itemColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'checklist_id',
+        'category',
+        'item_name',
+        'completed',
+        'completed_at',
+        'custom',
+        'sort_order',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const itemChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'checklist_items'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      expect(itemChecks.map((r) => r.conname).some((n) => n.includes('category'))).toBe(true);
+
+      const itemIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'checklist_items' ORDER BY indexname`,
+      );
+      expect(itemIndexes.map((r) => r.indexname).filter((n) => !n.endsWith('_pkey'))).toEqual([
+        'idx_checklist_items_order',
+      ]);
+      expect(
+        itemIndexes.find((r) => r.indexname === 'idx_checklist_items_order').indexdef,
+      ).toContain('(checklist_id, sort_order)');
+
+      const budgetColumns = await rows(
+        client,
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'budget_entries' ORDER BY ordinal_position`,
+      );
+      expect(budgetColumns.map((r) => r.column_name)).toEqual([
+        'id',
+        'user_id',
+        'category',
+        'item_name',
+        'planned_amount',
+        'actual_amount',
+        'entry_date',
+        'notes',
+        'receipt_image',
+        'created_at',
+        'updated_at',
+      ]);
+
+      const budgetChecks = await rows(
+        client,
+        `SELECT conname FROM pg_constraint
+         WHERE conrelid = 'budget_entries'::regclass AND contype = 'c' ORDER BY conname`,
+      );
+      expect(budgetChecks.map((r) => r.conname).some((n) => n.includes('category'))).toBe(true);
+
+      const budgetIndexes = await rows(
+        client,
+        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'budget_entries' ORDER BY indexname`,
+      );
+      expect(
+        budgetIndexes
+          .map((r) => r.indexname)
+          .filter((n) => !n.endsWith('_pkey'))
+          .sort(),
+      ).toEqual(['idx_budget_category', 'idx_budget_user', 'idx_budget_user_date']);
+      expect(budgetIndexes.find((r) => r.indexname === 'idx_budget_user_date').indexdef).toContain(
+        '(user_id, entry_date DESC)',
+      );
+    });
+  });
+
+  it('enforces one checklist per type, category domain checks and erasure cascade', async () => {
+    await withClient(async (client) => {
+      const user = await client.query(
+        `INSERT INTO users (phone_e164, phone_e164_digest) VALUES ('cipher-cl', 'digest-cl') RETURNING id`,
+      );
+      const userId = (user.rows[0] as { id: string }).id;
+
+      const created = await client.query(
+        `INSERT INTO checklists (user_id, checklist_type, title)
+         VALUES ($1, 'hospital_bag', 'Hospital Bag') RETURNING id, progress`,
+        [userId],
+      );
+      const checklistId = (created.rows[0] as { id: string }).id;
+      expect((created.rows[0] as { progress: string }).progress).toBe('0.00');
+
+      await expect(
+        client.query(
+          `INSERT INTO checklists (user_id, checklist_type, title)
+           VALUES ($1, 'hospital_bag', 'Second bag')`,
+          [userId],
+        ),
+      ).rejects.toThrow(/duplicate key|unique/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO checklists (user_id, checklist_type, title)
+           VALUES ($1, 'bogus', 'X')`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await expect(
+        client.query(
+          `INSERT INTO checklists (user_id, checklist_type, title, progress)
+           VALUES ($1, 'birth_prep', 'X', 101)`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      const item = await client.query(
+        `INSERT INTO checklist_items (checklist_id, category, item_name, completed, custom, sort_order)
+         VALUES ($1, 'Documents', 'ID Card', true, false, 0) RETURNING id, completed_at`,
+        [checklistId],
+      );
+      expect((item.rows[0] as { completed_at: unknown }).completed_at).toBeNull();
+
+      await expect(
+        client.query(
+          `INSERT INTO checklist_items (checklist_id, category, item_name)
+           VALUES ($1, 'bogus', 'X')`,
+          [checklistId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      const budget = await client.query(
+        `INSERT INTO budget_entries (user_id, category, item_name, planned_amount)
+         VALUES ($1, 'Transport', 'Taxi to hospital', 1500.50) RETURNING id`,
+        [userId],
+      );
+      const budgetId = (budget.rows[0] as { id: string }).id;
+
+      await expect(
+        client.query(
+          `INSERT INTO budget_entries (user_id, category, item_name)
+           VALUES ($1, 'bogus', 'X')`,
+          [userId],
+        ),
+      ).rejects.toThrow(/check/i);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+      const orphans = await client.query(
+        `SELECT (SELECT count(*) FROM checklists WHERE user_id = $1) +
+                (SELECT count(*) FROM checklist_items WHERE checklist_id = $2) +
+                (SELECT count(*) FROM budget_entries WHERE user_id = $1) AS total`,
+        [userId, checklistId],
+      );
+      expect(Number(orphans.rows[0].total)).toBe(0);
+
+      const staleBudget = await client.query(
+        `SELECT count(*) AS n FROM budget_entries WHERE id = $1`,
+        [budgetId],
+      );
+      expect(Number(staleBudget.rows[0].n)).toBe(0);
+    });
+  });
+
   it('rolls back all migrations cleanly and re-applies them', async () => {
     await runMigrations({
       databaseUrl: DATABASE_URL as string,
@@ -869,7 +1064,7 @@ describeMigrate('database migration baseline (001-019)', () => {
       const tables = await rows(
         client,
         `SELECT table_name FROM information_schema.tables
-         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches','journal_entries','journal_media')`,
+         WHERE table_schema = 'public' AND table_name IN ('users','profiles','pregnancies','babies','consents','user_preferences','content','content_versions','reminder_templates','reminder_instances','reminder_dispatches','journal_entries','journal_media','checklists','checklist_items','budget_entries')`,
       );
       expect(tables).toHaveLength(0);
     });

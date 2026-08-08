@@ -3,10 +3,29 @@ info:
   title: FathersNet Budget Service Contract
   version: 0.1.0
   description: >-
-    Skeleton for the budget/allocation service contract (AR-003). Planned
-    resources (implementation-plan/06 Phase B): allocation planning, budget
-    tracking. Contracts are defined here BEFORE implementation; paths land with
-    the corresponding work package.
+    Budget/allocation service contract (AR-003, WP-023, SRS §12.7) —
+    service-internal definition of the baby-budget surface: per-entry planning
+    and tracking against an 8-category taxonomy, plus an M-07 summary. Entries
+    are owned per user; reads/writes are self-scoped.
+
+    Ownership is enforced from the Bearer access JWT `sub` claim (cross-cutting
+    control, 02 §5) — the caller identity NEVER comes from the request body.
+    Invisibility (FR-126): a missing or non-owned entry is 404, never 403, so
+    existence is never disclosed. PATCH is a per-field merge (offline-sync-ready
+    contract, FR-089): only provided fields change; `actual_amount`, `notes` and
+    `receipt_image` accept explicit null to clear.
+
+    Summary per §8.3: `totalPlanned`, `totalActual` (null actuals count as 0),
+    `variance` = actual − planned, and `remaining` = cap − planned. The cap is
+    the configurable M-07 budget cap (`FN_BUDGET_CAP`); when unset, `cap` and
+    `remaining` are null. Amounts are non-negative NUMERIC(12,2).
+
+    Receipt images are metadata-only in this work package (Option A): the
+    `receipt_image` field stores a reference string and is accepted on PATCH
+    (including null to clear); no upload/storage/media pipeline exists yet.
+
+    This file is the single source of truth for the budget surface; the gateway
+    aggregation of these routes is a separate work package.
   contact:
     name: FathersNet Engineering
   license:
@@ -14,15 +33,348 @@ info:
     identifier: MIT
 
 servers:
-  - url: http://localhost:3000
-    description: Local development gateway (nginx terminates TLS in deployment).
+  - url: http://localhost:3600
+    description: Local development checklists service (budget routes share the same service, gateway wiring is a later WP).
 
 security:
   - bearerAuth: []
 
-paths: {}
+paths:
+  /v1/budget/entries:
+    get:
+      operationId: getBudgetEntries
+      summary: List the caller's budget entries
+      description: >-
+        Returns the caller's own budget entries, newest `entry_date` first,
+        with the aggregated planned/actual totals for the page. Other users'
+        entries never appear.
+      tags: [budget]
+      responses:
+        '200':
+          description: The caller's budget entries with totals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetEntryListPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+    post:
+      operationId: postBudgetEntry
+      summary: Create a budget entry
+      description: >-
+        Creates a budget entry owned by the token `sub` (FR-087). `entry_date`
+        defaults to the caller's local date when omitted. Amounts are
+        non-negative; the category must be one of the §12.7 taxonomy.
+      tags: [budget]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBudgetEntryRequest'
+      responses:
+        '201':
+          description: The created entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetEntryPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/budget/entries/{id}:
+    patch:
+      operationId: patchBudgetEntry
+      summary: Update a budget entry
+      description: >-
+        Per-field merge on an entry the caller owns (FR-089). Only provided
+        fields change; `actual_amount`, `notes` and `receipt_image` accept
+        explicit null to clear. Non-owned or missing ids are 404.
+      tags: [budget]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBudgetEntryRequest'
+      responses:
+        '200':
+          description: The updated entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetEntryPayload'
+        '400':
+          description: Malformed request body (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id or invalid field values (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+    delete:
+      operationId: deleteBudgetEntry
+      summary: Delete a budget entry
+      description: >-
+        Deletes an entry the caller owns (FR-128 erasure path). Non-owned ids
+        are 404. Returns 204 with no body.
+      tags: [budget]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Entry id (uuid).
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: Entry deleted.
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Entry not found or not owned by the caller (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Malformed id (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
+
+  /v1/budget/summary:
+    get:
+      operationId: getBudgetSummary
+      summary: Budget summary against the configurable M-07 cap
+      description: >-
+        §8.3 summary over the caller's own entries: totals, variance and the
+        remaining headroom against the configured M-07 cap. `cap`/`remaining`
+        are null when the cap is unset (`FN_BUDGET_CAP` = 0).
+      tags: [budget]
+      responses:
+        '200':
+          description: The budget summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetSummaryPayload'
+        '401':
+          description: Missing or invalid Bearer token (standard envelope).
+          content:
+            application/json:
+              schema:
+                $ref: './errors.yaml#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
     bearerAuth:
       $ref: './common.yaml#/components/securitySchemes/bearerAuth'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+    BudgetCategory:
+      type: string
+      enum: [Transport, Medical, Baby Items, Food, Clothing, Equipment, Emergency Fund, Other]
+
+    Date:
+      type: string
+      format: date
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+
+    CreateBudgetEntryRequest:
+      type: object
+      required: [category, item_name, planned_amount]
+      additionalProperties: false
+      properties:
+        category:
+          $ref: '#/components/schemas/BudgetCategory'
+        item_name:
+          type: string
+          description: Display name of the planned item (trimmed server-side).
+          minLength: 1
+          maxLength: 200
+        planned_amount:
+          type: number
+          description: Planned amount (non-negative, two decimals).
+          minimum: 0
+        actual_amount:
+          type: [number, 'null']
+          description: Actual amount when known; null while unfilled.
+          minimum: 0
+        entry_date:
+          $ref: '#/components/schemas/Date'
+          description: Entry date; defaults to the caller's local date when omitted.
+        notes:
+          type: [string, 'null']
+          maxLength: 1000
+
+    UpdateBudgetEntryRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        category:
+          $ref: '#/components/schemas/BudgetCategory'
+        item_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        planned_amount:
+          type: number
+          minimum: 0
+        actual_amount:
+          type: [number, 'null']
+          minimum: 0
+          description: Explicit null clears the recorded amount.
+        entry_date:
+          $ref: '#/components/schemas/Date'
+        notes:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Explicit null clears the note.
+        receipt_image:
+          type: [string, 'null']
+          maxLength: 2048
+          description: >-
+            Metadata-only reference to a receipt image (Option A). Stored
+            verbatim; no upload/storage pipeline exists in this WP. Explicit
+            null clears it.
+
+    BudgetEntryPayload:
+      type: object
+      required:
+        - id
+        - userId
+        - category
+        - itemName
+        - plannedAmount
+        - actualAmount
+        - entryDate
+        - notes
+        - receiptImage
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+          description: Owning user (the token `sub` at creation time).
+        category:
+          $ref: '#/components/schemas/BudgetCategory'
+        itemName:
+          type: string
+        plannedAmount:
+          type: number
+        actualAmount:
+          type: [number, 'null']
+        entryDate:
+          $ref: '#/components/schemas/Date'
+        notes:
+          type: [string, 'null']
+        receiptImage:
+          type: [string, 'null']
+          description: Metadata-only receipt reference; null when unset.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    BudgetEntryListPayload:
+      type: object
+      required: [items, totals]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          description: The caller's entries, newest entry_date first.
+          items:
+            $ref: '#/components/schemas/BudgetEntryPayload'
+        totals:
+          type: object
+          required: [totalPlanned, totalActual]
+          additionalProperties: false
+          properties:
+            totalPlanned:
+              type: number
+              description: Sum of planned_amount (two decimals).
+            totalActual:
+              type: number
+              description: Sum of actual_amount, null actuals counted as 0 (two decimals).
+
+    BudgetSummaryPayload:
+      type: object
+      required: [cap, totalPlanned, totalActual, variance, remaining]
+      additionalProperties: false
+      properties:
+        cap:
+          type: [number, 'null']
+          description: The configured M-07 budget cap; null when unset.
+        totalPlanned:
+          type: number
+        totalActual:
+          type: number
+        variance:
+          type: number
+          description: totalActual − totalPlanned (negative = over plan).
+        remaining:
+          type: [number, 'null']
+          description: cap − totalPlanned; null when the cap is unset.
